@@ -1,3 +1,5 @@
+> **Bohan fork:** Versioned public-document formatting, Word/Sheets table beautification, and manual cached PDF OCR live in [`bohan-enhancements/`](bohan-enhancements/README.md). The default `bohan` branch is based on upstream v0.12.29. This release ships enhancement source and a hash-checked compatibility overlay builder; upstream application build behavior is unchanged. [Standalone Claude / WorkBuddy skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
+
 <p align="center">
   <a href="https://genoffice.ai/">
     <picture>

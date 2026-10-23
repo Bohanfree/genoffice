@@ -1,0 +1,78 @@
+  const officialUndoRef = reactExports.useRef(null);
+  const officialBusyRef = reactExports.useRef(false);
+  const openOfficialTypeset = async () => {
+    if (officialBusyRef.current || document.getElementById("genoffice-official-typeset")) return;
+    const ctx = fileCtxRef.current;
+    const ed = ctx.editor;
+    if (!ctx.doc || !ed?.isEditable || aiPageCtxRef.current.locked) {
+      setStatus("请先打开可编辑的 Word 文档。"); return;
+    }
+    const identity = ctx.doc;
+    const beforeDoc = ed.state.doc;
+    const fingerprint = () => JSON.stringify({pages:aiPageCtxRef.current.sections,effective:aiPageCtxRef.current.effective,styles:aiStyleUpsertsRef.current});
+    const beforeKey = fingerprint();
+    const unchanged = () => fileCtxRef.current.doc === identity && fileCtxRef.current.editor === ed && ed.isEditable && !aiPageCtxRef.current.locked && ed.state.doc.eq(beforeDoc) && fingerprint() === beforeKey;
+    const keys = ["section","sectionDirty","sections","sectionsDirty","trailingStartType","titlePg","titlePgDirty","pgNumEdit","pgNumDirtySections"];
+    const snapshot = () => ({pm:ed.state.doc,styles:structuredClone(aiStyleUpsertsRef.current),page:structuredClone(Object.fromEntries(keys.map(k=>[k,fileCtxRef.current[k]]))),pageCtx:structuredClone({sections:aiPageCtxRef.current.sections,effective:aiPageCtxRef.current.effective})});
+    const restore = snap => {
+      const latest=fileCtxRef.current;
+      if(latest.doc!==identity || latest.editor!==ed) throw new Error("文档已切换，请重新打开公文排版。");
+      if(!ed.state.doc.eq(snap.pm))ed.view.dispatch(ed.state.tr.replaceWith(0,ed.state.doc.content.size,snap.pm.content).setMeta("addToHistory",false).setMeta("docsOps",{source:"ui",ops:["officialRestore"]}));
+      aiStyleUpsertsRef.current=structuredClone(snap.styles);latest.setStyleUpserts(aiStyleUpsertsRef.current);
+      for(const k of keys)latest["set"+k[0].toUpperCase()+k.slice(1)](structuredClone(snap.page[k]));
+      aiPageCtxRef.current.sections=structuredClone(snap.pageCtx.sections);
+      aiPageCtxRef.current.effective=structuredClone(snap.pageCtx.effective);
+      latest.dirtyRef.current=true;
+    };
+    const last=officialUndoRef.current;
+    const undoEligible=()=>last && last.identity===identity && ed.state.doc.eq(last.afterDoc) && fingerprint()===last.afterKey;
+    officialBusyRef.current=true;
+    try {
+      const fontFamilies=await loadSystemFontFamilies();
+      if(!unchanged())throw new Error("文档已变化，请重新点击 AI 排版。");
+      openOfficialDialog({
+        blocks:topLevelBlocks(beforeDoc).map(b=>({index:b.index,type:b.node.type.name,text:blockText(b.node)})),
+        fontFamilies,
+        canUndo:!!undoEligible(),
+        onUndo:()=>{
+          if(!unchanged() || !undoEligible())throw new Error("文档已有后续修改，请先保留当前版本。");
+          restore(last.before);officialUndoRef.current=null;setStatus("已撤回公文排版，请检查后保存。");
+        },
+        onApply:plan=>{
+          if(!unchanged())throw new Error("文档已变化，请取消后重新点击 AI 排版。");
+          const catalog=aiDocExtras.styles.list(),ups=[];
+          for(const op of plan.ops.filter(o=>o.op==="define_style")){
+            const {op:ignored,...input}=op;
+            const resolved=resolveStyleDefinition(input,catalog);
+            if(resolved.error)throw new Error(resolved.error);
+            ups.push(resolved.value.upsert);
+            const desc={styleId:input.styleId,name:input.name,type:input.type,headingLevel:input.paragraph?.outlineLevel||undefined};
+            const at=catalog.findIndex(s=>s.styleId===input.styleId);if(at<0)catalog.push(desc);else catalog[at]=desc;
+          }
+          const pages=aiPageCtxRef.current.sections.map(sec=>{
+            const r=resolvePageSetup(plan.pageSetup,sec);if(r.error)throw new Error(r.error);return r;
+          });
+          if(!pages.length)throw new Error("页面信息尚未就绪，请稍后重试。");
+          const ops=plan.ops.filter(o=>o.op!=="define_style").map(o=>{
+            if(o.op!=="setOfficialParagraphFormat")return o;
+            const error=validateOfficialAttrs(o.attrs);if(error)throw new Error(error);
+            return {...o,op:"setParagraphAttrs"};
+          });
+          const valid=executeOps(ed,ops,{source:"ui",styles:{list:()=>catalog},dryRun:true});
+          if(!valid.ok)throw new Error(valid.error);
+          const before=snapshot();
+          try {
+            for(const up of ups){const error=aiDocExtras.styles.upsert(up);if(error)throw new Error(error);}
+            const applied=executeOps(ed,ops,{source:"ui",styles:aiDocExtras.styles});
+            if(!applied.ok)throw new Error(applied.error);
+            if(ed.state.doc.textContent!==beforeDoc.textContent)throw new Error("文字保留核验失败，已恢复排版前状态。");
+            pages.forEach((page,i)=>{const error=aiPageSetupAccess.set(i,page);if(error)throw new Error(error);});
+            fileCtxRef.current.dirtyRef.current=true;
+            officialUndoRef.current={identity,before,afterDoc:ed.state.doc,afterKey:fingerprint()};
+            setStatus("公文排版已应用。检查后保存；再次点击 AI 排版可撤回本次排版。");
+          } catch(error){restore(before);throw error;}
+        }
+      });
+    } catch(error){setStatus("公文排版："+(error.message||String(error)));}
+    finally{officialBusyRef.current=false;}
+  };

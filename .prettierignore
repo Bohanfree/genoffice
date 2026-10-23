@@ -27,3 +27,8 @@ packages/html2docx/src/browser/
 
 # ISO/IEC 29500 schemas: keep byte-identical to the published files (one marked amendment).
 tools/ooxml-validate/schemas/
+
+# Frozen release-asset inputs: formatting changes invalidate renderer hashes.
+bohan-enhancements/official/*.mjs
+bohan-enhancements/tables/*.mjs
+bohan-enhancements/adapters/

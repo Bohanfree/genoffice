@@ -78,4 +78,9 @@ export default tseslint.config(
       '@typescript-eslint/no-require-imports': 'off',
     },
   },
+  {
+    // Frozen compatibility modules execute in the renderer's browser context.
+    files: ['bohan-enhancements/official/*.mjs', 'bohan-enhancements/tables/*.mjs'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
 )

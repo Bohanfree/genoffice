@@ -1,0 +1,23 @@
+
+adapter = (ROOT / 'adapters/v0.12.29/sheets-host.txt').read_text()
+entry = 'function handleRibbonCommand(ctx, command2) {'
+if source.count(entry) != 1: raise SystemExit('Ribbon command anchor changed.')
+source = source.replace(entry, adapter + '\n' + entry + '\n  if (command2 === "wps-table-beautify") { openWpsBeautifyFromRibbon(ctx); return; }', 1)
+undo_journal_anchor = '''        if (recorded.length === 0) return;
+        setPendingEdits(journalSize(state.editJournal));'''
+if source.count(undo_journal_anchor) != 1: raise SystemExit('Undo journal anchor changed.')
+source = source.replace(undo_journal_anchor, '''        restoreWpsBeautifyAlignmentJournal(state.editJournal, params.subUnitId, params.__wpsBeautifyAlignmentUndo, state.file.sha256);
+''' + undo_journal_anchor, 1)
+anchor = 'label: t2("appGroupStyles"), children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "styles-stack", children: ['
+if source.count(anchor) != 1: raise SystemExit('Style group anchor changed.')
+button = '''
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        className: "styles-row as-button",
+        "data-tip": "表格美化",
+        "aria-label": "表格美化",
+        onClick: () => onCommand("wps-table-beautify"),
+        children: [/* @__PURE__ */ jsxRuntimeExports.jsx(ToolSymbol, { symbol: "▦" }), "表格美化"]
+      }),'''
+expanded_anchor = anchor.replace('className: "styles-stack", children:', 'className: "styles-stack", style: { gridTemplateColumns: "repeat(2, auto)", columnGap: "8px" }, children:')
+source = source.replace(anchor, expanded_anchor + button, 1)
+source = 'import { openWpsTableBeautify as __openWpsTableBeautify } from "./wps-table-beautify-ui.mjs";\n' + source

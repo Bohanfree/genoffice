@@ -1,0 +1,28 @@
+name: Bohan enhancements
+on:
+  push:
+    branches: [bohan]
+    paths: ['bohan-enhancements/**', '.github/workflows/bohan-enhancements.yml']
+  pull_request:
+    branches: [bohan]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portable-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bohan-enhancements/package-lock.json
+      - name: Install isolated test dependencies
+        working-directory: bohan-enhancements
+        run: npm ci --ignore-scripts --workspaces=false
+      - name: Test formatting preservation and undo
+        run: node bohan-enhancements/test.mjs
+      - name: Test version and output guards
+        run: python3 bohan-enhancements/tests/test-stage.py

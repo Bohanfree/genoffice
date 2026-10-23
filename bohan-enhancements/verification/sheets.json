@@ -1,0 +1,20 @@
+{
+  "allSheetValuesAndFormulasPreserved": true,
+  "percentFormatPreserved": true,
+  "otherSheetMergePreserved": true,
+  "singleUndoAndRedoBeforeSave": true,
+  "runtimeFormulaResultsVisible": {
+    "C6": 75000,
+    "D6": 62200,
+    "E2": "82.0%",
+    "E6": "82.9%"
+  },
+  "layoutSingleUndoThenSaveRestoresOriginalCellFormats": true,
+  "undoSaveCellDifferences": 0,
+  "emptyStringNormalizedToBlank": true,
+  "BColumnWidthRestored": 18.0,
+  "gridToBandedSavedClearsOldGrid": true,
+  "reopenedSavedResultVisuallyVerified": true,
+  "savedStyleCellDifferences": 0,
+  "installedFinalRendererSHA256": "720d2433b998da67c6c43574b4a095dc9ba638dfe8970c095a9ee0b85f415a2c"
+}

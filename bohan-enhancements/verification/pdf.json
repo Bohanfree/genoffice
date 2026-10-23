@@ -1,0 +1,25 @@
+{
+  "version": "0.12.29",
+  "installed": true,
+  "rendererSHA256": {
+    "index-DpDiqQ18.js": "cacb5ed907984070dd81a0552572fe7424e09cbcc5b7ada5ee81e61f027faefa"
+  },
+  "runtime": {
+    "freshImageOnlyPDFOpenedWithoutOCR": true,
+    "manualOCREntryPresent": true,
+    "manualRecognitionCachedPages": 1,
+    "testTotalPages": 2,
+    "cacheRestoredOnReopenWithoutOCR": true,
+    "searchAfterReopen": {
+      "query": "20261023",
+      "matches": 1,
+      "page": 2
+    }
+  },
+  "nativeOCRObservation": "System OCR helper can be slow; one of two pages yielded recognized text in the live run. Cached pages are skipped on future manual passes.",
+  "focusedTests": "exact-content identity, cached and native-page skipping, cap/resume, cancellation, no automatic OCR on open",
+  "existingFeatureIntegrity": {
+    "docs-manifest.json": true,
+    "manifest.json": true
+  }
+}

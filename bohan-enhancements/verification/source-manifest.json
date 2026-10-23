@@ -1,0 +1,23 @@
+{
+  "release": "bohan-v0.12.29.1",
+  "base": "genspark-ai/genoffice@58dfd0b5b5eb3710efac0029b0452c61dba69035",
+  "files": {
+    "official/official-typeset-core.mjs": "ee9d83e1a79f11e8d01aec620d71bbcd71653e85e66e122115312a33effd82b7",
+    "official/official-typeset-ui.mjs": "f3ac47f9d53cf29886df86742559d854e8c80d192217288ce2e1217a98f4fa62",
+    "tables/wps-presets.json": "4721ceb9585a29d6bd621536a2fb0629f133d1046936829778bed8c054131af9",
+    "tables/wps-table-beautify-core.mjs": "7af2524b9d1e944fdea691baa9f81cafabfea53d0c4c89c827f9032610d1def3",
+    "tables/wps-table-beautify-ui.mjs": "2c081ebd8369edd7289b091a0d949d6633c1c7bd142a501b69a5319b142bdefe",
+    "tables/wps-word-presets.json": "87335018f5073edc2d5c6ee380e7b3bb109c83b44ce090c10b8d2a52c4539e43",
+    "tables/wps-word-table-adapter.mjs": "a994fd3d5b824bbe8df9ebcdb58dd48cad1122b8b314c9f2a899608f39ad923c",
+    "tables/wps-word-table-core.mjs": "e0a5a524a3a166cfff0f3bab46e48255b1623087e0bb47e669deb98cfff3676b",
+    "tables/wps-word-table-ui.mjs": "fb05d94014b63b5ae55a3cf78e48c8b5824dfe27eb4e69b638788714df2a3ab0",
+    "pdf/ocr-cache.txt": "ffd01cb4ac84952e93fa17d0f20558224c0ed7f73ec27f8d4d0c0570dcfee46c",
+    "adapters/v0.12.29/official-host.txt": "ee81657c5dda49e57ef46d57f1a07b2851f71d9d4a89772903200302b32e1120",
+    "adapters/v0.12.29/official.py.txt": "3d61da12252548aefdb77255dc33fa69723b38870a4ce96c6b058c9cd11d7b05",
+    "adapters/v0.12.29/patches.py": "5bdd6da88aa7dc761136ab7b66a3210ce0955fc5f8a467c48c8ae344e7a0a8ce",
+    "adapters/v0.12.29/pdf.py.txt": "044a4cf2157a96e91c7b7b8a8fcf8f39eee6a4ec158c1ac929f16ae809f3ae74",
+    "adapters/v0.12.29/sheets-host.txt": "39a02968d78ed8759f4e8b9aeb5fb645b2800789a4027ac94b9287214f290b2b",
+    "adapters/v0.12.29/sheets.py.txt": "ac14ac69b619738c5e9db2169cc24267fdd1afb43278b1bf12972b16c532dd04",
+    "adapters/v0.12.29/word.py.txt": "fff12719d6d765e75d618c937b52e862c7e584ec5c70886a7782d4d5cfee9014"
+  }
+}

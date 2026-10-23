@@ -1,0 +1,47 @@
+// GenOffice local patch: explicit OCR, cached by exact PDF content.
+const genOfficeOcrKeys = new WeakMap();
+async function genOfficeOcrContentKey(bytes) {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+}
+let genOfficeOcrDbPromise;
+function genOfficeOcrDb() {
+  if (!genOfficeOcrDbPromise) {
+    genOfficeOcrDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open("GenOfficePdfOcr-v1", 1);
+      request.onupgradeneeded = () => {
+        const store = request.result.createObjectStore("pages", { keyPath: ["document", "page"] });
+        store.createIndex("document", "document");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error("OCR cache is blocked"));
+    }).catch((error) => {
+      genOfficeOcrDbPromise = null;
+      throw error;
+    });
+  }
+  return genOfficeOcrDbPromise;
+}
+async function genOfficeReadOcrPages(key) {
+  if (!key) return new Map();
+  const db = await genOfficeOcrDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("pages", "readonly");
+    const request = transaction.objectStore("pages").index("document").getAll(key);
+    transaction.oncomplete = () => resolve(new Map(request.result.map((row) => [row.page, row.data])));
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
+  });
+}
+async function genOfficeWriteOcrPage(key, page, data) {
+  if (!key) return false;
+  const db = await genOfficeOcrDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("pages", "readwrite");
+    transaction.objectStore("pages").put({ document: key, page, data });
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = transaction.onabort = () => reject(transaction.error);
+  });
+}
