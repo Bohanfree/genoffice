@@ -11,6 +11,7 @@ import type { WorkbookChartEdit, WorkbookVisualEdit } from '../shared/edit-schem
 import type { SheetFilterState } from './xlsx-filter'
 import type { DefinedNamesState } from './xlsx-defined-names'
 import type { SheetPageSetupState } from './xlsx-page-setup'
+import type { SheetRedactionState } from './xlsx-redaction'
 import type {
   CellEdit,
   BulkConstantFill,
@@ -113,6 +114,8 @@ export interface StreamingSaveRequest {
   readonly workbookProtectionState?: { readonly lockStructure: boolean } | null | undefined
   readonly protectedRangeStates?: readonly SheetProtectedRangesState[] | undefined
   readonly tabColorStates?: readonly SheetTabColorState[] | undefined
+  /** null/undefined = the caller does not know the marks; the part is left as it is */
+  readonly redactionStates?: readonly SheetRedactionState[] | null | undefined
 }
 
 export interface StreamingSaveResult {
@@ -149,7 +152,10 @@ export async function saveWorkbookViaSidecar(
 ): Promise<StreamingSaveResult> {
   const workDir = await mkdtemp(join(tmpdir(), 'ai-excel-save-'))
   // SMB servers can retain a dot-file's hidden flag when it replaces the target.
-  const temporaryTarget = join(dirname(request.targetPath), `g${randomUUID()}.tmp.xlsx`)
+  const temporaryTarget = join(
+    dirname(request.targetPath),
+    `${basename(request.targetPath)}.${randomUUID()}.tmp`,
+  )
   try {
     const manifest = manifestResultSchema.parse(
       await request.client.archiveManifest(request.sourcePath),
@@ -184,6 +190,7 @@ export async function saveWorkbookViaSidecar(
       request.tabColorStates ?? [],
       request.tableEdits ?? [],
       request.cellImageAdditions ?? [],
+      request.redactionStates ?? null,
     )
 
     const replacements = await writePlanContents(workDir, 'replace', plan.replaced)

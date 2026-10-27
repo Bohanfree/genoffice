@@ -137,11 +137,11 @@ describe('saveWorkbookViaSidecar', () => {
       })
       expect(paths).toHaveLength(2)
       expect(dirname(paths[0]!)).toBe(directory)
-      expect(basename(paths[0]!)).toMatch(/^g[0-9a-f-]+\.tmp\.xlsx$/)
+      expect(basename(paths[0]!)).toMatch(/^smb-target\.xlsx\.[0-9a-f-]+\.tmp$/)
       expect(dirname(paths[1]!)).not.toBe(directory)
       const saved = await JSZip.loadAsync(await readFile(targetPath))
       expect(await saved.file('xl/worksheets/sheet1.xml')!.async('text')).toContain('SMB recovery')
-      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp.xlsx'))).toEqual([])
+      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
     },
   )
 
@@ -181,7 +181,7 @@ describe('saveWorkbookViaSidecar', () => {
         saveWorkbookViaSidecar({ client: archiveClient, sourcePath, targetPath, edits: [] }),
       ).rejects.toThrow('copy failed validation')
       expect(await readFile(targetPath, 'utf8')).toBe('previous target')
-      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp.xlsx'))).toEqual([])
+      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
     },
   )
 
