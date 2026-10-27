@@ -148,6 +148,31 @@ describe('promoteFileAtomically', () => {
     await rm(survivor, { force: true })
   }, 15_000)
 
+  it('reports SMB EAGAIN as a locked target and preserves the previous bytes', async () => {
+    const dir = await scratchDir()
+    const locked = join(dir, 'locked')
+    await mkdir(locked)
+    const temporary = join(locked, '.new.tmp.xlsx')
+    const target = join(locked, 'book.xlsx')
+    await writeFile(temporary, 'new-bytes')
+    await writeFile(target, 'old-bytes')
+    await chmod(locked, 0o555)
+    copyFileMock.mockImplementation(async (src, dest, mode) => {
+      if (String(src) === temporary) {
+        throw Object.assign(new Error('EAGAIN: resource temporarily unavailable'), {
+          code: 'EAGAIN',
+        })
+      }
+      return actualCopyFile(src, dest, mode)
+    })
+    await expect(promoteFileAtomically(temporary, target)).rejects.toThrow(
+      'The save target is locked by another program',
+    )
+    await chmod(locked, 0o755)
+    expect(await readFile(target, 'utf8')).toBe('old-bytes')
+    expect(await readFile(temporary, 'utf8')).toBe('new-bytes')
+  }, 15_000)
+
   it('propagates non-retryable errors untouched', async () => {
     const dir = await scratchDir()
     const temporary = join(dir, '.missing.tmp.xlsx')

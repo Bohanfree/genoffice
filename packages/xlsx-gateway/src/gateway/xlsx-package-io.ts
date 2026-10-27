@@ -148,7 +148,8 @@ export async function saveWorkbookViaSidecar(
   request: StreamingSaveRequest,
 ): Promise<StreamingSaveResult> {
   const workDir = await mkdtemp(join(tmpdir(), 'ai-excel-save-'))
-  const temporaryTarget = join(dirname(request.targetPath), `.${randomUUID()}.tmp.xlsx`)
+  // SMB servers can retain a dot-file's hidden flag when it replaces the target.
+  const temporaryTarget = join(dirname(request.targetPath), `g${randomUUID()}.tmp.xlsx`)
   try {
     const manifest = manifestResultSchema.parse(
       await request.client.archiveManifest(request.sourcePath),
@@ -190,15 +191,40 @@ export async function saveWorkbookViaSidecar(
       ...(await writePlanContents(workDir, 'add', plan.added)),
       ...(await writePlanContents(workDir, 'add-bin', plan.addedBinary)),
     ]
-    const result = saveArchiveResultSchema.parse(
-      await request.client.saveArchive({
-        sourcePath: request.sourcePath,
-        targetPath: temporaryTarget,
-        replacements,
-        removals: plan.removedEntries,
-        additions,
-      }),
-    )
+    const archiveRequest = {
+      sourcePath: request.sourcePath,
+      targetPath: temporaryTarget,
+      replacements,
+      removals: plan.removedEntries,
+      additions,
+    }
+    let archiveResult: unknown
+    try {
+      archiveResult = await request.client.saveArchive(archiveRequest)
+    } catch (error: unknown) {
+      // Rust sync_all requests F_FULLFSYNC on macOS; some SMB servers reject
+      // it with ENOTSUP. Rebuild locally, then copy and verify the sibling
+      // temporary archive before using the normal validated promotion path.
+      if (
+        process.platform !== 'darwin' ||
+        !/\(os error 45\)/.test(error instanceof Error ? error.message : String(error))
+      )
+        throw error
+      const localTarget = join(workDir, 'smb-save-fallback.xlsx')
+      archiveResult = await request.client.saveArchive({
+        ...archiveRequest,
+        targetPath: localTarget,
+      })
+      const localResult = saveArchiveResultSchema.parse(archiveResult)
+      await copyFile(localTarget, temporaryTarget)
+      const copiedManifest = manifestResultSchema.parse(
+        await request.client.archiveManifest(temporaryTarget),
+      ).entries
+      if (!manifestsEqual(localResult.afterEntries, copiedManifest)) {
+        throw new Error('The workbook copy failed validation while saving — aborted.')
+      }
+    }
+    const result = saveArchiveResultSchema.parse(archiveResult)
 
     // The source manifest was read before planning; if the file changed on
     // disk in between, the save's own before-manifest exposes the drift.
@@ -371,8 +397,8 @@ export function assertManifestPreserved(
   }
 }
 
-/** Transient Windows codes: antivirus/indexer/cloud sync briefly locks a path. */
-const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
+/** Transient Windows/SMB codes: another process briefly locks a path. */
+const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'EAGAIN'])
 const RENAME_RETRIES = 4
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

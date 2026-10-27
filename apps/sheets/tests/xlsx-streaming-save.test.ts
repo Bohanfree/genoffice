@@ -1,12 +1,12 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import JSZip from 'jszip'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import type { ArchiveEntry } from '@genoffice/xlsx-gateway/gateway/xlsx-package-io'
+import type { ArchiveClient, ArchiveEntry } from '@genoffice/xlsx-gateway/gateway/xlsx-package-io'
 import {
   assertManifestPreserved,
   saveWorkbookViaSidecar,
@@ -96,6 +96,94 @@ describe('saveWorkbookViaSidecar', () => {
     expect(sheet).toContain('<c r="A5"><v>41</v></c>')
     expect(sheet).toContain('<c r="A6"><v>42</v></c>')
   })
+
+  function wrappedClient(
+    saveArchive: ArchiveClient['saveArchive'],
+    manifest?: ArchiveClient['archiveManifest'],
+  ): ArchiveClient {
+    return {
+      archiveManifest: manifest ?? ((file) => client.archiveManifest(file)),
+      readEntries: (input) => client.readEntries(input),
+      scanEntries: (input) => client.scanEntries(input),
+      saveArchive,
+    }
+  }
+
+  it.skipIf(process.platform !== 'darwin')(
+    'recovers from SMB ENOTSUP and promotes a visible, validated workbook',
+    async () => {
+      const sourcePath = join(directory, 'smb-source.xlsx')
+      const targetPath = join(directory, 'smb-target.xlsx')
+      await writeFile(sourcePath, await buildEditFixture())
+      const paths: string[] = []
+      const archiveClient = wrappedClient(async (input) => {
+        paths.push(input.targetPath)
+        if (paths.length === 1) throw new Error('Operation not supported (os error 45)')
+        return client.saveArchive(input)
+      })
+      await saveWorkbookViaSidecar({
+        client: archiveClient,
+        sourcePath,
+        targetPath,
+        edits: [
+          {
+            sheetName: 'Data',
+            row: 0,
+            column: 0,
+            writeValue: true,
+            cell: { value: 'SMB recovery' },
+          },
+        ],
+      })
+      expect(paths).toHaveLength(2)
+      expect(dirname(paths[0]!)).toBe(directory)
+      expect(basename(paths[0]!)).toMatch(/^g[0-9a-f-]+\.tmp\.xlsx$/)
+      expect(dirname(paths[1]!)).not.toBe(directory)
+      const saved = await JSZip.loadAsync(await readFile(targetPath))
+      expect(await saved.file('xl/worksheets/sheet1.xml')!.async('text')).toContain('SMB recovery')
+      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp.xlsx'))).toEqual([])
+    },
+  )
+
+  it('propagates permission failures without replacing the existing target', async () => {
+    const sourcePath = join(directory, 'denied-source.xlsx')
+    const targetPath = join(directory, 'denied-target.xlsx')
+    await writeFile(sourcePath, await buildEditFixture())
+    await writeFile(targetPath, 'previous target')
+    let attempts = 0
+    const archiveClient = wrappedClient(async () => {
+      attempts++
+      throw new Error('Permission denied (os error 13)')
+    })
+    await expect(
+      saveWorkbookViaSidecar({ client: archiveClient, sourcePath, targetPath, edits: [] }),
+    ).rejects.toThrow('os error 13')
+    expect(attempts).toBe(1)
+    expect(await readFile(targetPath, 'utf8')).toBe('previous target')
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'rejects an invalid copied manifest before replacing the target',
+    async () => {
+      const sourcePath = join(directory, 'corrupt-source.xlsx')
+      const targetPath = join(directory, 'corrupt-target.xlsx')
+      await writeFile(sourcePath, await buildEditFixture())
+      await writeFile(targetPath, 'previous target')
+      let attempts = 0
+      const archiveClient = wrappedClient(
+        async (input) => {
+          if (++attempts === 1) throw new Error('Operation not supported (os error 45)')
+          return client.saveArchive(input)
+        },
+        async (file) => (file === sourcePath ? client.archiveManifest(file) : { entries: [] }),
+      )
+      await expect(
+        saveWorkbookViaSidecar({ client: archiveClient, sourcePath, targetPath, edits: [] }),
+      ).rejects.toThrow('copy failed validation')
+      expect(await readFile(targetPath, 'utf8')).toBe('previous target')
+      expect((await readdir(directory)).filter((name) => name.endsWith('.tmp.xlsx'))).toEqual([])
+    },
+  )
 
   it('saves a large constant fill without a per-cell edit payload', async () => {
     const sourcePath = join(directory, 'bulk-source.xlsx')
@@ -231,6 +319,7 @@ describe('assertManifestPreserved', () => {
 })
 
 function sidecarBinaryPath(): string {
+  if (process.env.GENOFFICE_TEST_SIDECAR) return process.env.GENOFFICE_TEST_SIDECAR
   const executable = process.platform === 'win32' ? 'xlsx-sidecar.exe' : 'xlsx-sidecar'
   return fileURLToPath(
     new URL(`../native/xlsx-engine/target/release/${executable}`, import.meta.url),
