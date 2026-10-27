@@ -1,0 +1,102 @@
+def replace_once(old, new):
+    global source
+    assert source.count(old) == 1, (source.count(old), old[:100])
+    source = source.replace(old, new)
+
+replace_once('const AUTO_OCR_PAGE_CAP = 40;', (ROOT / 'pdf/ocr-cache.txt').read_text() + '\nconst AUTO_OCR_PAGE_CAP = 40;')
+replace_once('  const total = scanned.length;\n  const finish =', '  queue = queue.filter((page) => !opts.hasPage?.(page));\n  const total = scanned.length;\n  const finish =')
+replace_once('      opts.onPage(queue[at], data);', '      await opts.onPage(queue[at], data);')
+replace_once('  const [ocrRun, setOcrRun] = reactExports.useState(null);', '''  const [ocrRun, setOcrRun] = reactExports.useState(null);
+  const [ocrCacheReady, setOcrCacheReady] = reactExports.useState(false);
+  const ocrPagesRef = reactExports.useRef(ocrPages);
+  ocrPagesRef.current = ocrPages;''')
+replace_once('      const bytes = new Uint8Array(data);\n      setFormHasXfa', '''      const bytes = new Uint8Array(data);
+      // Start an asynchronous content hash before PDF.js can transfer the buffer.
+      const ocrContentKey = genOfficeOcrContentKey(bytes);
+      setFormHasXfa''')
+replace_once('      setDoc(loaded);', '      genOfficeOcrKeys.set(loaded, ocrContentKey);\n      setDoc(loaded);')
+replace_once('''      if (!doc) return;
+      const live = ocrAbortRef.current;
+      const controller = live && !live.signal.aborted ? live : new AbortController();''', '''      if (!doc || !ocrCacheReady || ocrAbortRef.current) return;
+      const controller = new AbortController();''')
+replace_once('''        let result = null;
+        try {
+          result = await runAutoOcr({''', '''        let result = null;
+        let cacheFailed = false;
+        const key = await genOfficeOcrKeys.get(doc);
+        try {
+          result = await runAutoOcr({''')
+replace_once('''            onPage: (origIdx, data) => setOcrPages((prev) => new Map(prev).set(origIdx, data)),''', '''            hasPage: (origIdx) => ocrPagesRef.current.has(origIdx),
+            onPage: async (origIdx, data) => {
+              if (controller.signal.aborted || ocrAbortRef.current !== controller) return;
+              ocrPagesRef.current = new Map(ocrPagesRef.current).set(origIdx, data);
+              setOcrPages(ocrPagesRef.current);
+              try {
+                if (!await genOfficeWriteOcrPage(key, origIdx, data)) cacheFailed = true;
+              } catch { cacheFailed = true; }
+            },''')
+replace_once('''        if (ocrAbortRef.current !== controller) return;
+        setOcrRun(''', '''        if (ocrAbortRef.current !== controller) return;
+        ocrAbortRef.current = null;
+        if (cacheFailed) setNotice("识别结果已可用，本次未能写入本机缓存。");
+        else if (result?.stop === "complete") setNotice(
+          result.done > 0 ? `本次识别 ${result.done} 页，结果已保存在本机。` :
+          ocrPagesRef.current.size > 0 ? `已复用本机缓存（${ocrPagesRef.current.size} 页）。` :
+          result.total === 0 ? "未发现需要识别的扫描页。" : "本次未识别出文字，可稍后重试。"
+        );
+        else if (result?.stop === "noEngine") setNotice("扫描识别引擎暂不可用。");
+        setOcrRun(''')
+replace_once('''    [doc, searchIndexCache]
+  );
+  const ocrPending''', '''    [doc, searchIndexCache, ocrCacheReady]
+  );
+  const ocrPending''')
+old = '''  reactExports.useEffect(() => {
+    setOcrPages(/* @__PURE__ */ new Map());
+    setOcrRun(null);
+    if (!doc || sizes.length !== doc.numPages) return;
+    startOcrPass(null);
+    return () => {
+      ocrAbortRef.current?.abort();
+      ocrAbortRef.current = null;
+    };
+  }, [doc, sizes.length, searchIndexCache, startOcrPass]);'''
+new = '''  reactExports.useEffect(() => {
+    let stale = false;
+    ocrPagesRef.current = new Map();
+    setOcrPages(ocrPagesRef.current);
+    setOcrRun(null);
+    setOcrCacheReady(false);
+    if (doc && sizes.length === doc.numPages) {
+      // Opening a PDF only restores cached text; OCR requires the toolbar action.
+      void (async () => {
+        let pages = new Map();
+        try { pages = await genOfficeReadOcrPages(await genOfficeOcrKeys.get(doc)); }
+        catch (error) { console.warn("[pdf] OCR cache unavailable", error); }
+        if (stale) return;
+        ocrPagesRef.current = pages;
+        setOcrPages(pages);
+        setOcrCacheReady(true);
+      })();
+    }
+    return () => {
+      stale = true;
+      ocrAbortRef.current?.abort();
+      ocrAbortRef.current = null;
+    };
+  }, [doc, sizes.length]);'''
+replace_once(old, new)
+# Keep this action visible even when PDF modification is unavailable (encrypted files).
+replace_once('''            searchBtn,
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(''', '''            searchBtn,
+            jsxRuntimeExports.jsxs("button", {
+              className: "rb-big",
+              disabled: !doc || !ocrCacheReady || ocrRun?.stop === null,
+              "data-tip": "需要搜索、复制扫描文字时点击；已缓存的页面会直接复用。",
+              onClick: () => startOcrPass(null, ocrPagesRef.current.size),
+              children: [
+                jsxRuntimeExports.jsx("span", { className: "rb-big-icon", children: jsxRuntimeExports.jsx(IconFormText, {}) }),
+                jsxRuntimeExports.jsx("span", { children: ocrPages.size ? `扫描识别（已缓存 ${ocrPages.size} 页）` : "识别扫描页" })
+              ]
+            }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(''')

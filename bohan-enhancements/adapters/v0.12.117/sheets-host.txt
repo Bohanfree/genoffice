@@ -1,0 +1,160 @@
+function restoreWpsBeautifyAlignmentJournal(journal, sheetId, marker, fileSha256) {
+  // The native journal ignores ht/vt=null. Restore only this batch's previous
+  // alignment deltas, and only while its original save baseline is current.
+  if (!marker || marker.fileSha256 !== fileSha256) return;
+  const entries = journal.cells.get(sheetId);
+  if (!entries) return;
+  for (const saved of marker.cells) {
+    const key = `${saved.row}:${saved.column}`;
+    const entry = entries.get(key);
+    if (!entry) continue;
+    const style = { ...entry.style };
+    for (const field of ["horizontalAlignment", "verticalAlignment"]) {
+      if (Object.prototype.hasOwnProperty.call(saved, field)) style[field] = saved[field];
+      else delete style[field];
+    }
+    const next = { ...entry };
+    if (Object.keys(style).length) next.style = style;
+    else delete next.style;
+    if (!next.hasValue && !next.style && !next.styleReset) entries.delete(key);
+    else entries.set(key, next);
+  }
+}
+function openWpsBeautifyFromRibbon(ctx) {
+  const tableContext = ctx.tableDesignContext();
+  let origin;
+  const targetNow = () => {
+    const target = activeTarget$1(tableContext);
+    if (!target) throw new Error("请先打开一个工作簿");
+    if (origin && (target.state !== origin.state || target.sheetId !== origin.sheetId)) throw new Error("工作表已切换，请重新打开表格美化");
+    if (effectiveSheetProtection(target.state, target.sheetId)?.protected) throw new Error("请先取消工作表保护");
+    return target;
+  };
+  const parseArea = (text) => {
+    const raw = String(text).trim().replace(/\$/g, "").toUpperCase();
+    if (!/^[A-Z]{1,3}[1-9]\d*(?::[A-Z]{1,3}[1-9]\d*)?$/.test(raw)) throw new Error("请输入有效范围，例如 A1:E20");
+    const area = parseA1(raw);
+    const height = area.endRow - area.startRow + 1;
+    const width = area.endColumn - area.startColumn + 1;
+    if (area.startRow < 0 || area.startColumn < 0 || area.endRow >= 1048576 || area.endColumn >= 16384 || height < 1 || width < 1 || height * width > 100000) throw new Error("请选择 1 至 100000 个单元格的区域");
+    return { area, height, width };
+  };
+  const preparedRange = async (target, text) => {
+    const parsed = parseArea(text);
+    await ensureRowsLoaded(tableContext, target, parsed.area);
+    const range = target.worksheet.getRange(parsed.area.startRow, parsed.area.startColumn, parsed.height, parsed.width);
+    const nonempty = range.getCellDatas().some((row) => row.some((cell) => cell && (cell.v !== null && cell.v !== undefined && cell.v !== "" || cell.f || cell.si || cell.p?.body?.dataStream?.trim())));
+    if (!nonempty) throw new Error("所选区域没有数据，请选择需要美化的表格");
+    return { ...parsed, range };
+  };
+  void __openWpsTableBeautify({
+    notify: (message) => ctx.setMessage(message),
+    inspect: async () => {
+      origin = targetNow();
+      const range = createTableDefaultRange(tableContext);
+      if (!range) throw new Error("请先选择需要美化的表格");
+      await preparedRange(origin, range);
+      return { range, sheet: origin.worksheet.getSheetName() };
+    },
+    apply: async ({ range: text, preset, options, buildStyleMatrix, measureLayout }) => {
+      const target = targetNow();
+      const { area, height, width } = await preparedRange(target, text);
+      targetNow();
+      const matrix = buildStyleMatrix(preset, height, width, options);
+      for (const row of matrix) for (const cell of row) for (const [side, edge] of Object.entries(cell.s.bd ?? {})) {
+        // GenOffice's save journal records null as a border clear; s:0 is ignored.
+        if (edge?.s === 0) cell.s.bd[side] = null;
+      }
+      let dimensions = null;
+      if (options.layout !== "preserve") {
+        const selectedRange = target.worksheet.getRange(area.startRow, area.startColumn, height, width);
+        const values = selectedRange.getValues();
+        const rich = selectedRange.getCellDatas();
+        const formats = selectedRange.getNumberFormats?.() ?? [];
+        const formatter = target.runtime.univerAPI.Util.numfmt;
+        const texts = values.map((row, r) => row.map((value, c) => {
+          const richText = rich[r]?.[c]?.p?.body?.dataStream;
+          if (richText) return richText.replace(/\r?\n$/, "");
+          if (typeof value === "number" && formats[r]?.[c]) {
+            try { return String(formatter.format(formats[r][c], value)); } catch {}
+          }
+          return value === null || value === undefined ? "" : String(value);
+        }));
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("无法测量文字尺寸，请重试");
+        const gridWidth = document.getElementById("univer-container")?.getBoundingClientRect().width ?? 950;
+        dimensions = measureLayout(texts, matrix, { ...options, mdw: getWorkbookMdw(), availableWidth: gridWidth - 64 }, (value, style) => {
+          context.font = `${style.bl ? "bold " : ""}${(style.fs ?? 10) * 96 / 72}px "Microsoft YaHei", sans-serif`;
+          return context.measureText(value).width;
+        });
+      }
+      const unitId = target.runtime.univerAPI.getActiveWorkbook().getId();
+      const undoService = target.runtime.univer.__getInjector().get(IUndoRedoService);
+      const priorUndo = undoService._pitchUndoElement(unitId);
+      const alignmentBefore = { fileSha256: target.state.file.sha256, cells: [] };
+      for (let row = area.startRow; row <= area.endRow; row++) {
+        for (let column = area.startColumn; column <= area.endColumn; column++) {
+          const style = target.state.editJournal.cells.get(target.sheetId)?.get(`${row}:${column}`)?.style;
+          const cell = { row, column };
+          for (const field of ["horizontalAlignment", "verticalAlignment"]) {
+            if (style && Object.prototype.hasOwnProperty.call(style, field)) cell[field] = style[field];
+          }
+          alignmentBefore.cells.push(cell);
+        }
+      }
+      const batching = undoService.__tempBatchingUndoRedo(unitId);
+      const oldAutoHeightGate = loadAutoHeightSuppression.active;
+      loadAutoHeightSuppression.active = true;
+      const undoGroups = [];
+      let cursor = 0;
+      const execute = (command, params) => {
+        const success = target.runtime.univerAPI.syncExecuteCommand(command, { unitId, subUnitId: target.sheetId, ...params });
+        const item = undoService._pitchUndoElement(unitId);
+        if (item && item !== priorUndo && item.undoMutations.length > cursor) {
+          undoGroups.push(item.undoMutations.slice(cursor));
+          cursor = item.undoMutations.length;
+        }
+        if (!success) throw new Error("无法应用样式，请检查所选区域的保护状态");
+      };
+      let failure;
+      try {
+        // Native style commands mark their mutations as formatting. A content
+        // command with s-only cells makes the formula controller clear formulas.
+        const styleKeys = new Set(matrix.flatMap((row) => row.flatMap((cell) => Object.keys(cell.s))));
+        for (const type of styleKeys) {
+          execute("sheet.command.set-style", {
+            range: area,
+            style: { type, value: matrix.map((row) => row.map((cell) => cell.s[type])) }
+          });
+        }
+        if (dimensions) {
+          execute("sheet.command.set-worksheet-col-width", {
+            ranges: [area], value: Object.fromEntries(dimensions.columnWidths.map((value, column) => [area.startColumn + column, value]))
+          });
+          execute("sheet.command.set-row-height", {
+            ranges: [area], value: Object.fromEntries(dimensions.rowHeights.map((value, row) => [area.startRow + row, value]))
+          });
+        }
+      } catch (error) { failure = error; }
+      finally {
+        const item = undoService._pitchUndoElement(unitId);
+        // Native batching appends groups; undo must replay commands in reverse order.
+        if (item && item !== priorUndo) {
+          item.undoMutations = undoGroups.reverse().flat();
+          const lastCellUndo = item.undoMutations.findLast((mutation) => mutation.id === "sheet.mutation.set-range-values");
+          if (lastCellUndo) lastCellUndo.params.__wpsBeautifyAlignmentUndo = alignmentBefore;
+        }
+        batching.dispose();
+        loadAutoHeightSuppression.active = oldAutoHeightGate;
+      }
+      if (failure) {
+        if (undoService._pitchUndoElement(unitId) !== priorUndo) await target.runtime.univerAPI.undo();
+        throw failure;
+      }
+      ctx.setPendingEdits(journalSize(target.state.editJournal));
+      tableContext.refreshSelection();
+      ctx.setMessage(`已应用 ${preset.name} · ${height} 行 × ${width} 列，保存前可一次撤销`);
+    }
+  });
+}

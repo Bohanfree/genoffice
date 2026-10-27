@@ -1,0 +1,12 @@
+s=source
+def replace(old,new):
+    global s
+    assert s.count(old)==1,(old[:100],s.count(old))
+    s=s.replace(old,new)
+s='import {openOfficialDialog} from "./official-typeset-ui.mjs";\nimport {validateOfficialAttrs} from "./official-typeset-core.mjs";\n'+s
+replace('  onAiPreset,\n  tabRequest,','  onAiPreset,\n  onOfficialTypeset,\n  tabRequest,')
+replace('disabled: docEmpty,\n                  "data-tip": t2("aiTidyBtn"),\n                  onClick: () => onAiPreset(t2("aiTidyPrompt")),','disabled: !canEdit || docEmpty,\n                  "data-tip": "公文排版",\n                  onClick: () => onOfficialTypeset(),')
+replace('  const ribbonActions = useStableCallbacks({',(ROOT/'adapters/v0.12.117/official-host.txt').read_text()+'\n  const ribbonActions = useStableCallbacks({\n    onOfficialTypeset: () => void openOfficialTypeset(),')
+replace('function nodeFormat(node) {\n  const format2 = {};','function nodeFormat(node) {\n  const format2 = {};\n  if (node.attrs?.snapToGrid === false) format2.snapToGrid = false;')
+replace('function formatPPrChildren(format2) {\n  if (!format2) return [];\n  const out = [];','function formatPPrChildren(format2) {\n  if (!format2) return [];\n  const out = [];\n  if (format2.snapToGrid === false) out.push({name:"w:snapToGrid",xml:\'<w:snapToGrid w:val="0"/>\'});')
+replace('  const managedTags = new Set(FORMAT_MANAGED_TAGS);','  const managedTags = new Set(FORMAT_MANAGED_TAGS);\n  if (format2?.snapToGrid === false || original2?.snapToGrid === false) managedTags.add("w:snapToGrid");')

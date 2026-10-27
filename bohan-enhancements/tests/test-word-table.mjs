@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { Schema } = require('prosemirror-model'),
-  { EditorState, NodeSelection } = require('prosemirror-state'),
+  { EditorState, NodeSelection, TextSelection } = require('prosemirror-state'),
   { history, undo, redo, closeHistory, undoDepth } = require('prosemirror-history'),
   { TableMap } = require('prosemirror-tables')
 import { createWordTableBridge } from '../tables/wps-word-table-adapter.mjs'
 import { buildWordMatrix, mergedWordStyle } from '../tables/wps-word-table-core.mjs'
+import { nativeDocsHelpers } from './native-docs-helpers.mjs'
 const attrs = (keys) => Object.fromEntries(keys.map((k) => [k, { default: null }]))
 const schema = new Schema({
   nodes: {
@@ -214,6 +215,13 @@ const notices = [],
     alignAttrFor: (a) => a,
     effectiveBidi: () => false,
   }
+if (process.env.BOHAN_DOCS_RENDERER) {
+  Object.assign(helpers, nativeDocsHelpers(process.env.BOHAN_DOCS_RENDERER))
+  // A caret inside a cell exercises the shipped selectedTable helper, whereas
+  // selecting the whole table takes the bridge's own NodeSelection branch.
+  state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, tablePos + 4)))
+  assert.equal(helpers.selectedTable(state).pos, tablePos)
+}
 const bridge = createWordTableBridge(editor, helpers)
 assert.equal(bridge.inspect().cellCount, 8)
 const before = state.doc.toJSON()

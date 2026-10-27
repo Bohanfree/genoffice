@@ -1,0 +1,24 @@
+s=source
+imports='import {openWpsWordTableBeautify} from "./wps-word-table-ui.mjs";\nimport {createWordTableBridge} from "./wps-word-table-adapter.mjs";\n'
+s=imports+s
+anchor='  const runTableCommand = (command2) => {'
+if s.count(anchor)!=1:raise SystemExit('runTableCommand anchor drift')
+hook='''  const openWpsWordBeautify = () => {
+    if (!canEdit) return;
+    void openWpsWordTableBeautify(createWordTableBridge(editor, {
+      selectedTable, TableMap, closeHistory, buildTextMarkPatch, alignAttrFor, effectiveBidi,
+      availableWidth: section ? Math.max(1, (section.pageWidth-section.marginLeft-section.marginRight)/15) : 624,
+      notify: (message) => showToast(message)
+    }));
+  };
+'''
+s=s.replace(anchor,hook+anchor)
+anchor='            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "table-style-gallery", children: ['
+if s.count(anchor)!=1:raise SystemExit('table-style-gallery anchor drift')
+button='''
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+                className: "table-style-card", "data-tip": "表格美化 · WPS 样式", onClick: openWpsWordBeautify,
+                children: [jsxRuntimeExports.jsx("span", {className:"table-style-card-grid",style:{background:"repeating-linear-gradient(to bottom,#4F81BD 0 20%,#DCE6F1 20% 40%,#FFFFFF 40% 60%)"}}),jsxRuntimeExports.jsx("span",{children:"表格美化"})]
+              }),'''
+s=s.replace(anchor,anchor+button)
+if 'import {openOfficialDialog}' not in s or 'onOfficialTypeset' not in s:raise SystemExit('Official-typeset patch missing')

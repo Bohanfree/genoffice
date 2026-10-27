@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { makePlan, validateOfficialAttrs } from '../official/official-typeset-core.mjs'
 
 const source = fs.readFileSync(
-  new URL('../adapters/v0.12.29/official-host.txt', import.meta.url),
+  new URL(`../adapters/v${process.env.BOHAN_ADAPTER_VERSION ?? '0.12.29'}/official-host.txt`, import.meta.url),
   'utf8',
 )
 function scenario({ failPage = false } = {}) {
@@ -89,6 +89,7 @@ function scenario({ failPage = false } = {}) {
     loadSystemFontFamilies: async () => ['STFangsong'],
     topLevelBlocks: () => [{ index: 0, node: { type: { name: 'docParagraph' } } }],
     blockText: () => '原文',
+    blockText$1: () => '原文',
     openOfficialDialog: (arg) => (state.dialog = arg),
     validateOfficialAttrs,
     resolveStyleDefinition: (input) => ({ value: { upsert: input } }),

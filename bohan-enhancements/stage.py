@@ -26,33 +26,70 @@ EXPECTED_RENDERERS = {
 }
 
 
+# Each adapter is pinned to the exact clean macOS vendor build.
+VERSIONS = {
+    '0.12.29': {
+        'names': NAMES, 'baselines': BASELINES, 'expected': EXPECTED_RENDERERS,
+        'release': 'bohan-v0.12.29.1',
+    },
+    '0.12.117': {
+        'names': {'docs': 'index-CYNQkvnc.js', 'sheets': 'index-CG8lQClX.js', 'pdf': 'index-wUHEIxfM.js'},
+        'baselines': {
+            'docs': '3628cbe61e08bc9b898c531cca62b0ad8d52752e657f2402046b8aab68b1019d',
+            'sheets': 'f70f46c222f2b56c2c2d667ebfeb22f9fecf9e4becc3e12c95c1d57c7239447a',
+            'pdf': 'ff357988957e170579dd1ed1ec6d7f2954479b3b8b744d68fe8a676df35ad885',
+        },
+        'expected': {
+            'docs': '970b182ab5ef223888f064f27b74e35b20596e7a1202800d0059a91639f02f2a',
+            'sheets': 'db759763e2179128c589cc33da3b28eb9098eb79e9e8069f7b7bcb25754cb4a3',
+            'pdf': 'b7e2db6d99f4fe966688711e523dfee931b278aa71122044966c7a84e2801532',
+        },
+        'release': 'bohan-v0.12.117.1',
+    },
+}
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def stage(resources, output):
+def stage(resources, output, version=None):
     resources, output = Path(resources).resolve(), Path(output).resolve()
     if output == resources or resources in output.parents or output in resources.parents:
         raise ValueError('Output must be separate from the input Resources tree.')
     if output.exists():
         raise ValueError('Output already exists; use a fresh directory.')
-    sources = {}
-    # Check every module before creating any output or applying transformations.
-    for module, name in NAMES.items():
-        raw = (resources / 'modules' / module / 'renderer/assets' / name).read_bytes()
-        if digest(raw) != BASELINES[module]:
-            raise ValueError(f'{module}: unsupported or already modified renderer; expected clean macOS 0.12.29.')
-        sources[module] = raw.decode('utf-8')
-    spec = importlib.util.spec_from_file_location('bohan_01229', ROOT / 'adapters/v0.12.29/patches.py')
+    candidates = [version] if version else list(VERSIONS)
+    selected = None
+    for candidate in candidates:
+        if candidate not in VERSIONS:
+            raise ValueError(f'Unsupported adapter version: {candidate}')
+        config = VERSIONS[candidate]
+        paths = {m: resources / 'modules' / m / 'renderer/assets' / n for m, n in config['names'].items()}
+        if all(p.is_file() and digest(p.read_bytes()) == config['baselines'][m] for m, p in paths.items()):
+            selected = candidate
+            break
+    if selected is None:
+        raise ValueError('unsupported or already modified renderer; supply a clean supported macOS app.')
+    config = VERSIONS[selected]
+    sources = {m: p.read_text(encoding='utf-8') for m, p in paths.items()}
+    spec = importlib.util.spec_from_file_location('bohan_adapter', ROOT / f'adapters/v{selected}/patches.py')
     patches = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(patches)
+    main_archive = None
+    if selected == '0.12.117':
+        # Validate and transform the host before writing any output.
+        spec_main = importlib.util.spec_from_file_location('bohan_stage_main', ROOT / 'stage_main.py')
+        stage_main = importlib.util.module_from_spec(spec_main)
+        spec_main.loader.exec_module(stage_main)
+        main_archive = stage_main.patch_asar((resources / 'app.asar').read_bytes())
     rendered = {
         'docs': patches.patch_word(patches.patch_official(sources['docs'])),
         'sheets': patches.patch_sheets(sources['sheets']),
         'pdf': patches.patch_pdf(sources['pdf']),
     }
     for module, source in rendered.items():
-        if digest(source.encode('utf-8')) != EXPECTED_RENDERERS[module]:
+        if digest(source.encode('utf-8')) != config['expected'][module]:
             raise ValueError(f'{module}: generated renderer differs from the verified release.')
     output.parent.mkdir(parents=True, exist_ok=True)
     # Stage atomically so a failed build never leaves a partial overlay.
@@ -61,7 +98,9 @@ def stage(resources, output):
         for module, source in rendered.items():
             target = dest / 'modules' / module / 'renderer/assets'
             target.mkdir(parents=True)
-            (target / NAMES[module]).write_text(source, encoding='utf-8')
+            (target / config['names'][module]).write_text(source, encoding='utf-8')
+        if main_archive is not None:
+            (dest / 'app.asar').write_bytes(main_archive)
         docs = dest / 'modules/docs/renderer/assets'
         sheets = dest / 'modules/sheets/renderer/assets'
         for name in ('official-typeset-core.mjs', 'official-typeset-ui.mjs'):
@@ -72,8 +111,9 @@ def stage(resources, output):
             shutil.copyfile(ROOT / 'tables' / name, sheets / name)
         files = {p.relative_to(dest).as_posix(): digest(p.read_bytes()) for p in sorted(dest.rglob('*')) if p.is_file()}
         (dest / 'bohan-overlay.json').write_text(json.dumps({
-            'release': 'bohan-v0.12.29.1', 'upstreamVersion': '0.12.29',
-            'baselineRenderers': BASELINES, 'files': files,
+            'release': config['release'], 'upstreamVersion': selected,
+            'sourceBaseline': 'v0.12.115' if selected == '0.12.117' else 'v0.12.29',
+            'baselineRenderers': config['baselines'], 'files': files,
         }, indent=2) + '\n', encoding='utf-8')
         dest.rename(output)
     return files
@@ -81,11 +121,12 @@ def stage(resources, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--resources', type=Path, required=True, help='Clean macOS 0.12.29 Contents/Resources directory')
+    parser.add_argument('--resources', type=Path, required=True, help='Clean supported macOS Contents/Resources directory')
     parser.add_argument('--output', type=Path, required=True, help='New output directory outside Resources')
+    parser.add_argument('--version', choices=VERSIONS, help='Require this adapter; otherwise detect exact baseline hashes')
     args = parser.parse_args()
     try:
-        files = stage(args.resources, args.output)
+        files = stage(args.resources, args.output, args.version)
     except (ValueError, FileNotFoundError, AssertionError) as error:
         parser.exit(1, f'Staging stopped: {error}\n')
     print(f'Staged {len(files)} verified files at {args.output}. Application was not modified.')

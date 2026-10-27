@@ -5,10 +5,16 @@ import { buildStyleMatrix } from '../tables/wps-table-beautify-core.mjs'
 
 // Run the actual shipped command, mutation, formula listener, style merge and
 // journal code. Only app services (workbook, DI and viewport) are in-memory.
+const adapterVersion = process.env.BOHAN_ADAPTER_VERSION ?? '0.12.29'
+const baselines = {
+  '0.12.29': 'cd03b813680981ce46769bc245d254dfbe4ecef48546fee8412baa663b76131a',
+  '0.12.117': 'f70f46c222f2b56c2c2d667ebfeb22f9fecf9e4becc3e12c95c1d57c7239447a',
+}
+assert.ok(baselines[adapterVersion], 'Unsupported adapter version')
 const source = readFileSync(process.env.BOHAN_SHEETS_RENDERER, 'utf8')
 assert.equal(
   createHash('sha256').update(source).digest('hex'),
-  'cd03b813680981ce46769bc245d254dfbe4ecef48546fee8412baa663b76131a',
+  baselines[adapterVersion],
 )
 const between = (start, end) => {
   const at = source.indexOf(start)
@@ -53,6 +59,7 @@ const dependencies = {
   toDisposable: (dispose) => ({ dispose }),
 }
 const declarations = [
+  between('let BorderStyleTypes =', 'let BorderType ='),
   between('var ObjectMatrix = class ObjectMatrix2 {', 'function convertCellToRange('),
   between('function defineExactKeys() {', 'const DEFAULT_STYLES ='),
   between('function isFormulaString(value) {', 'function handleStyleToString('),
@@ -124,7 +131,7 @@ const {
   toSaveEdits,
 } = native
 const adapter = readFileSync(
-  new URL('../adapters/v0.12.29/sheets-host.txt', import.meta.url),
+  new URL(`../adapters/v${adapterVersion}/sheets-host.txt`, import.meta.url),
   'utf8',
 )
 const restoreWpsBeautifyAlignmentJournal = Function(
