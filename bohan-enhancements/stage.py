@@ -38,9 +38,9 @@ VERSIONS = {
         'expected': {
             'docs': '573bc42599b68b9e09cea5670bb5d573c5d7ac6b70e311574e4dac247ebff67f',
             'sheets': '27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67',
-            'pdf': '6a52d77770011807f1084c9c3a1f5036dafd57e1ba37dc5cc7c366c1710b50df',
+            'pdf': '2fbfe75391084c6718c0ee9555120ec5a0654c61ee8e9c0f1ef9d5937a98677a',
         },
-        'release': 'bohan-v0.12.446.1', 'platform': 'win32-x64',
+        'release': 'bohan-v0.12.446.2', 'platform': 'win32-x64',
         'sourceBaseline': 'v0.12.446',
     },
     '0.12.29': {

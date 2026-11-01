@@ -100,3 +100,14 @@ replace_once('''            searchBtn,
               ]
             }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs(''')
+
+# Upstream 446 computes OCR bake inserts before initializing pageGeomRef.
+# Cached or newly recognized pages make that eager memo hit the temporal dead zone.
+memo_start = source.index('  const ocrBakeInserts = reactExports.useMemo(')
+memo_end = source.index('  const [searchIndexCache]', memo_start)
+memo = source[memo_start:memo_end]
+assert memo.endswith('  }, [ocrPages]);\n')
+source = source[:memo_start] + source[memo_end:]
+anchor = '  pageGeomRef.current = pageGeom;\n'
+assert source.count(anchor) == 1
+source = source.replace(anchor, anchor + memo.replace('[ocrPages]);', '[ocrPages, pageGeom]);'), 1)

@@ -68,3 +68,34 @@ assert(!effect.includes('startOcrPass('), 'opening or cache restoration must nev
 console.log(
   'Passed: exact-content keys; cached/native-page skipping; cap/resume; cancellation; no OCR on open.',
 )
+
+// Execute the shipped component's real hook sequence with a restored OCR page.
+// In 446 the upstream eager bake memo referenced pageGeomRef before initialization.
+if (process.env.BOHAN_ADAPTER_VERSION === '0.12.446') {
+  const start = source.indexOf('  const [ocrPages, setOcrPages] =');
+  const refEnd = source.indexOf('  pageGeomRef.current = pageGeom;', start) + '  pageGeomRef.current = pageGeom;'.length;
+  const memoStart = source.indexOf('  const ocrBakeInserts =', start);
+  const memoEnd = source.indexOf('  }, [ocrPages, pageGeom]);', memoStart) + '  }, [ocrPages, pageGeom]);'.length;
+  const fragment = source.slice(start, Math.max(refEnd, memoEnd));
+  let firstState = true;
+  const renderContext = vm.createContext({
+    reactExports: {
+      useState(init) {
+        const value = firstState ? new Map([[0, { words: [{ text: 'cached OCR' }] }]]) : typeof init === 'function' ? init() : init;
+        firstState = false;
+        return [value, () => {}];
+      },
+      useMemo: (fn) => fn(), useCallback: (fn) => fn, useRef: (value) => ({ current: value }),
+    },
+    createSearchIndexCache: () => ({}), allSizes: [{ width: 600, height: 300 }],
+    order: null, deleted: new Set(), spread: false, spreadRows: (v) => v,
+    rowOfVisIdx: (i) => i, filePath: 'fixture.pdf', rotations: new Map(),
+    rotationsRef: { current: new Map() }, pageOrigins: [[0, 0]], baseRots: [0], pageUserUnits: [1],
+    blankSizeNow: () => ({ width: 600, height: 300 }),
+    buildOcrBakeInserts: (page, words, geom) => [{ page, text: words[0].text, width: geom.pw }],
+  });
+  const inserts = vm.runInContext(fragment + '\nocrBakeInserts', renderContext);
+  assert.equal(inserts[0].input.text, 'cached OCR');
+  assert.equal(inserts[0].input.width, 600);
+  console.log('Passed: restored OCR pages render without accessing uninitialized geometry.');
+}

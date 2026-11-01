@@ -1,7 +1,7 @@
 {
   "desktopVersion": "0.12.446",
   "platform": "win32-x64",
-  "enhancementRelease": "bohan-v0.12.446.1",
+  "enhancementRelease": "bohan-v0.12.446.2",
   "publicSourceBaseline": "v0.12.446",
   "cleanRendererHashes": {
     "docs": "536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3",
@@ -16,7 +16,7 @@
     "modules/docs/renderer/assets/wps-word-table-adapter.mjs": "a994fd3d5b824bbe8df9ebcdb58dd48cad1122b8b314c9f2a899608f39ad923c",
     "modules/docs/renderer/assets/wps-word-table-core.mjs": "e0a5a524a3a166cfff0f3bab46e48255b1623087e0bb47e669deb98cfff3676b",
     "modules/docs/renderer/assets/wps-word-table-ui.mjs": "fb05d94014b63b5ae55a3cf78e48c8b5824dfe27eb4e69b638788714df2a3ab0",
-    "modules/pdf/renderer/assets/index-H9Qe9zLW.js": "6a52d77770011807f1084c9c3a1f5036dafd57e1ba37dc5cc7c366c1710b50df",
+    "modules/pdf/renderer/assets/index-H9Qe9zLW.js": "2fbfe75391084c6718c0ee9555120ec5a0654c61ee8e9c0f1ef9d5937a98677a",
     "modules/sheets/renderer/assets/index-ayY7qpCu.js": "27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67",
     "modules/sheets/renderer/assets/wps-presets.json": "4721ceb9585a29d6bd621536a2fb0629f133d1046936829778bed8c054131af9",
     "modules/sheets/renderer/assets/wps-table-beautify-core.mjs": "7af2524b9d1e944fdea691baa9f81cafabfea53d0c4c89c827f9032610d1def3",
@@ -38,7 +38,10 @@
     "isolatedProfile": true,
     "officialLayoutDialogAndParagraphPreview": true,
     "missingTitleFontIsReported": true,
-    "fullApplySaveReopenAcceptance": "pending"
+    "fullApplySaveReopenAcceptance": "Word apply/save and OOXML inspection passed; Excel apply/save and formula inspection passed; PDF OCR result restored after restart and cache reused.",
+    "excelFormulasPreserved": true,
+    "pdfManualRecognitionAndCacheRestore": true,
+    "pdfUpstreamGeometryInitializationFix": true
   },
   "installedOnUserMachine": false,
   "publicArtifacts": "Enhancement source, recipes, tests and checksums only; no official installers, user files, credentials or test profile."
