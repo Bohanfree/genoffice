@@ -40,7 +40,7 @@ VERSIONS = {
             'sheets': '27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67',
             'pdf': 'c910b72cae9e9455201166ca2cb095e603123f09be3aaab5d1715dcaa446ede2',
         },
-        'release': 'bohan-v0.12.446.5', 'platform': 'win32-x64',
+        'release': 'bohan-v0.12.446.6', 'platform': 'win32-x64',
         'sourceBaseline': 'v0.12.446',
     },
     '0.12.29': {

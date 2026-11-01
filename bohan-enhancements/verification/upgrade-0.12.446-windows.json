@@ -1,7 +1,7 @@
 {
   "desktopVersion": "0.12.446",
   "platform": "win32-x64",
-  "enhancementRelease": "bohan-v0.12.446.5",
+  "enhancementRelease": "bohan-v0.12.446.6",
   "publicSourceBaseline": "v0.12.446",
   "cleanRendererHashes": {
     "docs": "536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3",
@@ -10,7 +10,7 @@
   },
   "generatedResourceHashes": {
     "app.asar": "ae1456304bc9fba520966d18c88768d8b2365366b643c6383a52c4173f7309de",
-    "bohan-webdav/bootstrap.cjs": "35cf13cbef5c5200c2ada6e40f78bfae3c472776c14d1f8a86618f1cbac77eee",
+    "bohan-webdav/bootstrap.cjs": "a122eaee959beb066d5bc7e25576be0c63b82ed4e90fea1009272d038c09b69c",
     "bohan-webdav/client.cjs": "5698fa6d7ab40576c317a43c1d5991e2a060bf2ee88d0422f5d757aa5fda758b",
     "bohan-webdav/Configure-WebDAV.ps1": "ccc27967af8681c4e4f06caa942ec1372851914402f0dca7d9c636a1f9e3df35",
     "bohan-webdav/credentials.ps1": "494976c1d2e9ada4e1f164a27b170540c3a4e56561c615df4f7001954602a5b5",
@@ -19,7 +19,7 @@
     "modules/docs/preload/index.js": "7af112e01de454c442035e73bbe160d5adfc15f270e7cc252c94921527d6fbc2",
     "modules/docs/renderer/assets/index-hHkjX_DW.js": "088516ee5b767991530c76f999a7b9ed8f2f5117b08c62b89396b45edab54d50",
     "modules/docs/renderer/assets/official-typeset-core.mjs": "ee9d83e1a79f11e8d01aec620d71bbcd71653e85e66e122115312a33effd82b7",
-    "modules/docs/renderer/assets/official-typeset-ui.mjs": "f3ac47f9d53cf29886df86742559d854e8c80d192217288ce2e1217a98f4fa62",
+    "modules/docs/renderer/assets/official-typeset-ui.mjs": "7e9efe957b8553c3c053db2b0fa93fc861b3b837153db20d3bbb17f68d06028e",
     "modules/docs/renderer/assets/wps-word-presets.json": "87335018f5073edc2d5c6ee380e7b3bb109c83b44ce090c10b8d2a52c4539e43",
     "modules/docs/renderer/assets/wps-word-table-adapter.mjs": "a994fd3d5b824bbe8df9ebcdb58dd48cad1122b8b314c9f2a899608f39ad923c",
     "modules/docs/renderer/assets/wps-word-table-core.mjs": "e0a5a524a3a166cfff0f3bab46e48255b1623087e0bb47e669deb98cfff3676b",
@@ -43,7 +43,8 @@
     "officialInstallerSHA512Verified": true,
     "officialInstallerAuthenticodeStatus": "Valid",
     "webdavProtocolTestsPassed": 13,
-    "configurationPowerShellSyntaxPassed": true
+    "configurationPowerShellSyntaxPassed": true,
+    "localizedFontResolverRegressionPassed": true
   },
   "runtime": {
     "isolatedProfile": true,
@@ -85,6 +86,18 @@
       "backupEngineAcceptanceRevision": 4,
       "setupRevision": 5,
       "presetDestinationAndAccountPasswordOnlySetup": true
+    },
+    "localizedTitleFontFix": {
+      "fontInstalledBeforeFix": true,
+      "fontFamilyChinese": "方正小标宋简体",
+      "fontFamilyEnglish": "FZXiaoBiaoSong-B05S",
+      "oldDialogFalseMissingWarningReproduced": true,
+      "newDialogAcceptsChineseInput": true,
+      "actualNativeApplyAndSavePassed": true,
+      "savedOOXMLUsesInstalledFamily": true,
+      "allDocumentTextUnchanged": true,
+      "isolatedProfileAndFictionalDocument": true,
+      "backupBehaviorUnchanged": true
     }
   },
   "installedOnUserMachine": false,

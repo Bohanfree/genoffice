@@ -1,19 +1,32 @@
 import {chooseFonts,makePlan,ROLE_NAMES} from './official-typeset-core.mjs';
 
+// Windows and Chromium may enumerate different localized names of the same family.
+// These are names from that font's name table, never substitute typefaces.
+const FAMILY_ALIASES=[['方正小标宋简体','FZXiaoBiaoSong-B05S']];
+export function createFontResolver(fontFamilies=[],probe=()=>false) {
+  const key=name=>name.trim().normalize('NFC').toLowerCase();
+  const known=new Map(fontFamilies.filter(x=>typeof x==='string'&&x.trim()).map(name=>[key(name),name]));
+  return name=>{
+    const exact=known.get(key(name));if(exact)return exact;
+    const aliases=FAMILY_ALIASES.find(group=>group.some(alias=>key(alias)===key(name)))||[name];
+    if(known.size)return aliases.map(alias=>known.get(key(alias))).find(Boolean)||null;
+    return aliases.find(alias=>probe(alias))||null;
+  };
+}
+
 // Only explicit clicks can change the document. All source text is rendered as textContent.
 export function openOfficialDialog({blocks,fontFamilies=[],canUndo=false,onApply,onUndo}) {
   const existing=document.getElementById('genoffice-official-typeset');
   if(existing){existing.focus();return;}
-  const known=new Set(fontFamilies.map(x=>x.toLowerCase()));
   const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
-  const hasFont=name=>{
-    if(known.size)return known.has(name.toLowerCase());
+  const resolveFont=createFontResolver(fontFamilies,name=>{
     const sample='公文排版通知一二三 abc 012';
     return ['monospace','serif','sans-serif'].some(base=>{
       ctx.font=`72px ${base}`;const width=ctx.measureText(sample).width;
       ctx.font=`72px ${JSON.stringify(name)}, ${base}`;return Math.abs(ctx.measureText(sample).width-width)>.1;
     });
-  };
+  });
+  const hasFont=name=>!!resolveFont(name);
   const {fonts,substitutions}=chooseFonts(hasFont),overrides={};
   const initial=makePlan(blocks,{fonts});
   const priorFocus=document.activeElement;
@@ -57,7 +70,9 @@ export function openOfficialDialog({blocks,fontFamilies=[],canUndo=false,onApply
   apply.onclick=()=>run(()=>{
     const picked=Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value.trim()]));
     for(const font of Object.values(picked))if(!hasFont(font))throw new Error(`本机未检测到字体“${font}”，请选用已安装字体。`);
-    onApply(makePlan(blocks,{fonts:picked,overrides}));
+    // Store the installed family spelling so CSS rendering and saved OOXML agree.
+    const resolved=Object.fromEntries(Object.entries(picked).map(([role,font])=>[role,resolveFont(font)]));
+    onApply(makePlan(blocks,{fonts:resolved,overrides}));
   });
   root.addEventListener('keydown',e=>{
     if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();}

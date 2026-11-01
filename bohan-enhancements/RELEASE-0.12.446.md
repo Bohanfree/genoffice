@@ -1,3 +1,5 @@
+Revision 6 fixes the false missing-font warning for 方正小标宋简体 when Chromium enumerates the same installed family as FZXiaoBiaoSong-B05S. The dialog accepts both localized names, applies the actual enumerated family, and still rejects genuinely missing fonts. No font files are bundled. Document backup behavior remains unchanged.
+
 Revision 5 presets the requested backup destination and displays it during setup. Configuration asks only for account and hidden password, then enables the already-authorized backup. No address or YES input is required. An explicit `-Endpoint` override remains available.
 
 Revision 4 replaces opaque WebDAV backup trees with ordinary, directly usable document files to Windows GenOffice 0.12.446 while preserving:
