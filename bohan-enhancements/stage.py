@@ -98,7 +98,7 @@ def stage(resources, output, version=None):
         for module, source in rendered.items():
             target = dest / 'modules' / module / 'renderer/assets'
             target.mkdir(parents=True)
-            (target / config['names'][module]).write_text(source, encoding='utf-8')
+            (target / config['names'][module]).write_bytes(source.encode('utf-8'))
         if main_archive is not None:
             (dest / 'app.asar').write_bytes(main_archive)
         docs = dest / 'modules/docs/renderer/assets'

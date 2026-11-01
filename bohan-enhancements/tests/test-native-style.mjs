@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import path from 'node:path'
 import { buildStyleMatrix } from '../tables/wps-table-beautify-core.mjs'
 
 // Run the actual shipped command, mutation, formula listener, style merge and
@@ -447,7 +448,7 @@ function setAlignment(f, ht, vt) {
       )
 }
 const mainSource = readFileSync(
-  '/Applications/GenOffice.app/Contents/Resources/modules/sheets/main/index.js',
+  path.resolve(path.dirname(process.env.BOHAN_SHEETS_RENDERER), '../../main/index.js'),
   'utf8',
 )
 const fromMain = (start, end) => {
