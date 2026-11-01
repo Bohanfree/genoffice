@@ -37,7 +37,9 @@ class BackupQueue {
     if (![1, 2].includes(this.state.schema) || !uuid(this.state.deviceId) || !this.state.documents ||
         !Array.isArray(this.state.tasks) || !Array.isArray(this.state.history) || !Array.isArray(this.state.errors) ||
         !Object.entries(this.state.documents).every(([key, doc]) => path.isAbsolute(key) && uuid(doc?.id) &&
-          (doc.remoteName === undefined || validName(doc.remoteName))) ||
+          (doc.remoteName === undefined || validName(doc.remoteName)) &&
+          (doc.localPath === undefined || (path.isAbsolute(doc.localPath) && keyFor(doc.localPath) === key)) &&
+          (doc.remotePath === undefined || (Array.isArray(doc.remotePath) && doc.remotePath.length > 0 && doc.remotePath.every(validName)))) ||
         !this.state.tasks.every(t => uuid(t?.id) && uuid(t.documentId) && typeof t.localKey === 'string' &&
           path.isAbsolute(t.localKey) && this.state.documents[t.localKey]?.id === t.documentId &&
           /^[a-f0-9]{64}$/.test(t.hash) && /^\.[a-z0-9]+$/.test(t.extension) &&
@@ -73,10 +75,17 @@ class BackupQueue {
       this.state.documents = {}; this.state.deviceId = randomUUID(); this.state.destination = this.destination;
     }
     for (const t of this.state.tasks) if (t.status === 'uploading') t.status = 'queued';
-    this.captureChain = Promise.resolve(); this.pendingCaptures = 0; this.running = false; this.stopped = false; this.abort = null;
+    this.captureChain = Promise.resolve(); this.locks = new Map(); this.pendingCaptures = 0; this.running = false; this.stopped = false; this.abort = null;
     this.persist();
   }
   persist() { atomicJson(this.file, this.state); try { this.onChange(this.summary()); } catch {} }
+  exclusive(key, operation) {
+    const previous = this.locks.get(key) || Promise.resolve();
+    const next = previous.catch(() => {}).then(operation);
+    this.locks.set(key,next);
+    void next.finally(() => {if(this.locks.get(key) === next) this.locks.delete(key);}).catch(()=>{});
+    return next;
+  }
   assignName(doc, original, next = false) {
     if (doc.remoteName && !next) return doc.remoteName;
     let number = next ? (doc.nameNumber || 1) + 1 : 1, name;
@@ -120,6 +129,7 @@ class BackupQueue {
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || count !== before.size) throw new Error('file-changed-during-snapshot');
       const digest = hash.digest('hex'), key = keyFor(file);
       const doc = this.state.documents[key] ||= { id: randomUUID(), lastHash: null, etag: null, hasRemote: false };
+      doc.localPath = file;
       const tail = this.state.tasks.filter(t => t.documentId === doc.id).at(-1);
       if ((tail ? tail.hash : doc.lastHash) === digest) return false;
       const snapshot = path.join(this.root, 'snapshots', id + '.bin');
@@ -150,11 +160,11 @@ class BackupQueue {
           const hash = createHash('sha256'); for await (const chunk of fs.createReadStream(snapshot)) hash.update(chunk);
           if (hash.digest('hex') !== task.hash) throw new Error('snapshot-corrupt');
           const remoteName = this.assignName(doc, task.name); this.persist();
-          const result = await this.client.upload(task, snapshot, { remoteName,
+          const result = await this.exclusive(task.localKey, () => this.client.upload(task, snapshot, { remoteName, remotePath:doc.remotePath,
             expectedEtag: doc.etag, hasRemote: doc.hasRemote, signal: this.abort.signal,
             onWriteStarted: () => { task.writeStarted = true; this.persist(); },
             onCollision: () => { delete task.writeStarted; const name = this.assignName(doc, task.name, true); this.persist(); return name; }
-          });
+          }));
           doc.lastHash = task.hash; doc.etag = result.etag; doc.hasRemote = true;
           this.state.history.unshift({ name: task.name, remoteName:doc.remoteName, hash: task.hash, time: new Date(this.clock()).toISOString(), remote: result.remote });
           this.state.history = this.state.history.slice(0, 100);

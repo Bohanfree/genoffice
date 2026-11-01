@@ -81,8 +81,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          tag=bohan-v0.12.446.6
-          asset=bohan-enhancements-windows-0.12.446.6-source.zip
+          tag=bohan-v0.12.446.7
+          asset=bohan-enhancements-windows-0.12.446.7-source.zip
           git archive --format=zip --output="$asset" HEAD bohan-enhancements LICENSE
           sha256sum "$asset" > "$asset.sha256"
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

@@ -1,76 +1,32 @@
-# WebDAV document backup — Windows 0.12.446 revision 5
+# WebDAV 云文档（Windows 0.12.446 增强版 7）
 
-## User-visible behavior
+主页左侧“文件夹”自动增加 **WebDAV 云文档**。云朵按钮打开云目录并刷新。支持展开子目录，在 GenOffice 中直接打开文件，用原有 Word、Excel、PDF 等编辑器编辑并保存。配置已预设此个人 fork 的 WebDAV 地址，只需手动输入账号和隐藏密码。
 
-After explicit setup, opening a document backs up its saved bytes. A successful
-save updates the same remotely named document. The configured destination contains
-ordinary files such as `Report.docx`, `Budget.xlsx` and `Scan.pdf`, directly usable
-by WebDAV clients. There are no new device/document UUID directories, version
-trees or JSON manifests. A different source with the same filename gets a readable
-suffix, for example `Report (2).docx`; the local mapping keeps that name on later saves.
-Long basenames are shortened to fit a 220-byte UTF-8 component, preserving extension.
+## 同步行为
 
-The experience is informed by a limited [REA analysis of WPS](verification/WPS-BACKUP-REFERENCE.md).
-This is saved-document backup, not two-way cloud sync. Local originals, recovery
-storage and manual PDF OCR caches remain. Unsaved edits and OCR caches are not uploaded.
-No recent-file scan or bulk historical upload runs. Only successful opens/saves
-capture new snapshots. Local deletion never deletes a remote backup.
+- 本地文件成功打开或保存后建立映射，上传不可变快照。新设备可以直接在云文件夹打开已有文件。
+- 云端打开时检查更新；后台每 30 秒检查已经关联且本地仍存在的文件。关闭的文档在本地内容未变时拉回云端更新。
+- 打开的编辑器不会被云端内容覆盖。状态菜单显示“云端有更新”；关闭并重新打开后拉取。
+- 离线仍可从最近文件打开已下载文档并保存，队列跨重启保留，联网自动补传。全新云文件仍需网络；离线不能浏览服务器目录。
+- 两边都变更时条件写入阻止覆盖。先关闭文档，在“更多操作 → 同步冲突：保留双方”处理：云端内容保留原名，本地内容另存原目录中的“冲突副本”并继续上传。未上传的保存快照也保留在历史中。
+- 服务器必须提供 ETag 并支持条件 GET/PUT。没有可靠 ETag 时停止替换。
+- 不传播删除、移动或重命名。云端删除后报告状态并保留本地内容；本地删除后保留云端内容。目录支持浏览、打开和原位保存，不提供云端文件管理操作。
+- 不提供分享、多人实时协作或账号权限管理。借鉴 WPS 的打开/保存备份交互；不宣称等同 WPS 云服务。
 
-The WebDAV menu shows status, retry, global/file pause and directory exclusions.
-The status dialog identifies enhancement revision 5. Offline tasks survive restart.
-The old `backups-v1` tree remains untouched. Local schema 1 queues are backed up
-before conversion: pending snapshots resume under readable names, while old
-manifest ETags and dedup hashes are cleared. Previously completed documents are
-backed up in the new layout the next time they are opened or saved.
+## 历史版本
 
-## Configuration and passwords
+文件“更多操作 → 历史版本”查看时间和大小，分页选择后可打开副本或恢复。编辑器内可使用应用菜单“WebDAV 云文档 → 当前文件历史版本”。
 
-Choose WebDAV 备份 → 配置 WebDAV（手动输入密码）, use the displayed preset backup URL, enter the account and manually enter the
-hidden password to enable, then restart. No URL or YES entry is required. The
-personal fork supplies the user-requested default URL; operators may override it
-with the explicit -Endpoint parameter.
-Every reconfiguration, including during updates/deployment, requires new manual
-password input. Ordinary restarts reuse Windows Credential Manager. The wizard
-accepts no password argument or password file. JSON stores only the URL, account,
-credential-store reference and backup preferences. The default destination URL ships in this personal fork at the user's request; accounts, passwords and private runtime settings do not. The helper's Read action is an internal parent-process pipe and must
-never be used as an interactive status command. Credentials stay in the main process.
-The helper's execution policy applies only to that subprocess.
+替换云文件前先归档精确匹配当前 ETag 的旧版本，新版本也归档。历史写入失败时保留待传快照并重试。首次直接打开云文件时也归档其内容。恢复先归档当前云端版本，再条件恢复选定版本；需要关闭文档并完成待传文件。恢复期间的本地并发修改会保留并提示。
 
-## Transfer and collision handling
+版本内容存储在 WebDAV 的 `.genoffice-history/` 系统目录，以相对路径的 SHA-256 分组，不向普通云列表展示。日常目录只有原名文档，不再建立 backups-v1 结构。内部历史目录应与文档一起保留，删除它会失去历史。默认不自动清理版本；历史副本打开后不自动重新上传。
 
-Capture and SHA-256 hash a stable local snapshot before uploading. Unchanged bytes
-are skipped; A → B → A saves remain ordered. Only one upload runs at once. A new
-remote file uses `If-None-Match: *`. A known file updates with `If-Match` and its
-previous ETag. An existing same-name remote file is never adopted by a new source,
-even if its bytes match; assign a numeric suffix instead. Assigned names and write
-intent are persisted before writes.
+历史来自增强版启用后的保存、打开、同步和冲突处理，无法补回此前不存在的历史。外部客户端在两次检查之间覆盖的中间版本也无法追溯。
 
-After a disconnect/crash may have hidden a successful PUT, stream-download the
-assigned file and compare its size and full SHA-256 before acknowledging it. This
-also works for binary files larger than the small textual-response limit. A known
-remote edit produces a conflict: keep the remote file and the durable local
-snapshot, block later uploads for that document, and show it in status for manual
-comparison. Retry never silently overwrites a conflict. Missing ETags prevent a
-subsequent overwrite. PUT atomicity depends on the WebDAV server; incomplete or
-uncertain writes retain local snapshots for recovery. No remote temporary objects
-or old-version cleanup are needed.
+## 配置与保留内容
 
-Require HTTPS with certificate validation; do not follow redirects. Default limits
-are 512 MiB per document and 2 GiB pending snapshots. Retry delays grow from 10 seconds
-to 5 minutes. Queue errors remain visible. Exit waits for local captures, not the
-network. Keep 100 completed receipts locally and remove only completed/orphaned
-local snapshots. Destination/account changes cannot redirect pending queued bytes.
+每次运行配置向导必须手动隐藏输入密码。普通启动使用 Windows 凭据管理器，配置文件和 fork 不含密码；fork 不含账号。地址可通过显式 -Endpoint 参数覆盖。更新沿用现有有效配置时不重新配置，不把密码输出到部署记录。
 
-## Integration and validation
+公文排版、Word/Excel 表格美化、PDF 手动识别、本地原文、恢复缓存及 OCR 缓存全部保留。OCR 缓存和未保存编辑不上传。旧 backups-v1 原样保留，不批量回填最近文件。暂停和文件夹排除继续生效。默认每文件 512 MiB、待传快照总量 2 GiB，远端历史容量由 WebDAV 空间决定。
 
-Native successful open/save hooks stay unchanged. Docs/PDF wait for renderer parse
-acknowledgement; Sheets supplies the saved source path. Cancelled, failed or
-password-pending opens do not trigger backup. PDF recognition remains manual.
-
-Tests cover readable UTF-8 names, in-place updates, local and remote name collisions,
-offline restart, A → B → A saves, snapshot isolation, conditional conflicts, large
-binary lost-response recovery, schema migration, damaged queue/snapshots, capacity,
-disabled/excluded documents, hook filtering and unsafe endpoints. The unchanged
-formatting/OCR assets and pinned native compatibility checks protect the existing
-enhancements. Release artifacts exclude vendor bundles, user documents, evidence
-bundles, profiles, personal settings and credentials.
+包含 23 个经过 SHA-256 验证的 overlay 文件，从干净的官方 Windows 0.12.446 生成。先发布 fork，再下载 fork 的 recipe 更新本机。

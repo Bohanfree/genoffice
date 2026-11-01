@@ -9,17 +9,17 @@ class DavError extends Error {
 }
 
 class DavClient {
-  constructor({ endpoint, credentials, allowHttpForTests = false, timeout = 45000 }) {
+  constructor({ endpoint, credentials, allowHttpForTests = false, timeout = 45000, historyEnabled = false }) {
     this.base = new URL(endpoint);
     if (this.base.username || this.base.password || this.base.search || this.base.hash ||
         (this.base.protocol !== 'https:' && !(allowHttpForTests && this.base.protocol === 'http:'))) {
       throw new DavError('invalid-endpoint');
     }
     if (!this.base.pathname.endsWith('/')) this.base.pathname += '/';
-    this.credentials = credentials; this.timeout = timeout;
+    this.credentials = credentials; this.timeout = timeout; this.historyEnabled = historyEnabled;
   }
   url(parts) {
-    if (parts.some(p => typeof p !== 'string' || !p || p === '.' || p === '..' || /[/\\]/.test(p))) throw new DavError('invalid-remote-path');
+    if (!Array.isArray(parts) || parts.some(p => typeof p !== 'string' || !p || p === '.' || p === '..' || /[/\\\x00-\x1f]/.test(p))) throw new DavError('invalid-remote-path');
     return new URL(parts.map(encodeURIComponent).join('/'), this.base);
   }
   async request(method, url, { headers = {}, body, file, signal, hashOnly = false, maxBytes = 1024 * 1024 } = {}) {
@@ -62,24 +62,30 @@ class DavClient {
     this.check(result, [200]);
     return result.size === task.size && result.hash === task.hash ? result : null;
   }
-  async upload(task, file, { remoteName, expectedEtag, hasRemote, signal, onCollision, onWriteStarted }) {
+  async upload(task, file, { remoteName, remotePath, expectedEtag, hasRemote, signal, onCollision, onWriteStarted }) {
     // Only document files are stored remotely. Names/identity and retry state live locally.
     for (let attempt = 0; attempt < 100; attempt++) {
-      const final = this.url([remoteName]);
+      const parts = remotePath || [remoteName], final = this.url(parts);
       if (task.writeStarted) {
         // A disconnect/crash may have hidden a successful PUT. Stream the bytes to
         // verify them rather than treating a large document as a text response.
         const same = await this.matchingRemote(final, task, signal);
-        if (same) return { etag:same.etag || null, remote:final.href };
+        if (same) {
+          if (this.historyEnabled) await this.archive(parts,file,task.hash,Date.parse(task.capturedAt));
+          return { etag:same.etag || null, remote:final.href };
+        }
       }
       if (hasRemote && !expectedEtag) throw new DavError('missing-etag');
+      // Save the exact old remote revision before conditional replacement. A failed
+      // archive blocks the write; a second device can never erase an unarchived edit.
+      if (this.historyEnabled && hasRemote) await this.archiveRemote(parts,expectedEtag);
       onWriteStarted?.();
       const result = await this.request('PUT', final, { file, signal, headers: {
         'Content-Type':'application/octet-stream',
         ...(hasRemote ? { 'If-Match':expectedEtag } : { 'If-None-Match':'*' })
       }});
       if (result.status === 412) {
-        if (hasRemote) throw new DavError('conflict', 412);
+        if (hasRemote || remotePath) throw new DavError('conflict', 412);
         // A new document must never replace a same-name file from another source.
         // Persist each assigned name before a write so retries keep that name.
         remoteName = onCollision?.();
@@ -87,6 +93,7 @@ class DavClient {
         continue;
       }
       this.check(result, [200, 201, 204]);
+      if (this.historyEnabled) await this.archive(parts,file,task.hash,Date.parse(task.capturedAt));
       if (result.etag) return { etag:result.etag, remote:final.href };
       const same = await this.matchingRemote(final, task, signal);
       if (!same) throw new DavError('conflict');
@@ -95,4 +102,5 @@ class DavClient {
     throw new DavError('too-many-name-collisions');
   }
 }
+require('./dav-cloud.cjs').install(DavClient,DavError);
 module.exports = { DavClient, DavError };
