@@ -1,7 +1,7 @@
 {
   "desktopVersion": "0.12.446",
   "platform": "win32-x64",
-  "enhancementRelease": "bohan-v0.12.446.4",
+  "enhancementRelease": "bohan-v0.12.446.5",
   "publicSourceBaseline": "v0.12.446",
   "cleanRendererHashes": {
     "docs": "536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3",
@@ -10,9 +10,9 @@
   },
   "generatedResourceHashes": {
     "app.asar": "ae1456304bc9fba520966d18c88768d8b2365366b643c6383a52c4173f7309de",
-    "bohan-webdav/bootstrap.cjs": "fdb905b7ecdc3e1492c79a204be691920bca73876e0c5bb48be0ac028cb45ae4",
+    "bohan-webdav/bootstrap.cjs": "35cf13cbef5c5200c2ada6e40f78bfae3c472776c14d1f8a86618f1cbac77eee",
     "bohan-webdav/client.cjs": "5698fa6d7ab40576c317a43c1d5991e2a060bf2ee88d0422f5d757aa5fda758b",
-    "bohan-webdav/Configure-WebDAV.ps1": "fe62ff6c12c45107f79230ada517d6ad43b29a717e2d640c0c6ed61ad93788ef",
+    "bohan-webdav/Configure-WebDAV.ps1": "ccc27967af8681c4e4f06caa942ec1372851914402f0dca7d9c636a1f9e3df35",
     "bohan-webdav/credentials.ps1": "494976c1d2e9ada4e1f164a27b170540c3a4e56561c615df4f7001954602a5b5",
     "bohan-webdav/hooks.cjs": "ab33c1cce5dd2bbc22ffdc02bc24901849e38db60059bbbf2ddad197d248977f",
     "bohan-webdav/queue.cjs": "0616fbdda98672c9428fcef363f3e4fee56019378d98f44d019566503dbc6140",
@@ -42,7 +42,8 @@
     "stageTestsPassed": 3,
     "officialInstallerSHA512Verified": true,
     "officialInstallerAuthenticodeStatus": "Valid",
-    "webdavProtocolTestsPassed": 13
+    "webdavProtocolTestsPassed": 13,
+    "configurationPowerShellSyntaxPassed": true
   },
   "runtime": {
     "isolatedProfile": true,
@@ -68,7 +69,6 @@
       "enhancementRevision": 3
     },
     "webdav": {
-      "enhancementRevision": 4,
       "isolatedProfile": true,
       "fictionalFilesOnly": true,
       "nativeDocsOpenAndSave": true,
@@ -81,7 +81,10 @@
       "remainingTasks": 0,
       "formattingPDFAndHookAssetsUnchangedFromRevision3": true,
       "passwordNeverInRepositoryOrConfig": true,
-      "configurationAlwaysRequiresManualPassword": true
+      "configurationAlwaysRequiresManualPassword": true,
+      "backupEngineAcceptanceRevision": 4,
+      "setupRevision": 5,
+      "presetDestinationAndAccountPasswordOnlySetup": true
     }
   },
   "installedOnUserMachine": false,

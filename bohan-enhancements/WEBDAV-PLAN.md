@@ -1,4 +1,4 @@
-# WebDAV document backup — Windows 0.12.446 revision 4
+# WebDAV document backup — Windows 0.12.446 revision 5
 
 ## User-visible behavior
 
@@ -17,7 +17,7 @@ No recent-file scan or bulk historical upload runs. Only successful opens/saves
 capture new snapshots. Local deletion never deletes a remote backup.
 
 The WebDAV menu shows status, retry, global/file pause and directory exclusions.
-The status dialog identifies enhancement revision 4. Offline tasks survive restart.
+The status dialog identifies enhancement revision 5. Offline tasks survive restart.
 The old `backups-v1` tree remains untouched. Local schema 1 queues are backed up
 before conversion: pending snapshots resume under readable names, while old
 manifest ETags and dedup hashes are cleared. Previously completed documents are
@@ -25,13 +25,14 @@ backed up in the new layout the next time they are opened or saved.
 
 ## Configuration and passwords
 
-Choose WebDAV 备份 → 配置 WebDAV（手动输入密码）, supply an HTTPS folder URL and
-account, manually enter the hidden password and type YES to enable, then restart.
+Choose WebDAV 备份 → 配置 WebDAV（手动输入密码）, use the displayed preset backup URL, enter the account and manually enter the
+hidden password to enable, then restart. No URL or YES entry is required. The
+personal fork supplies the user-requested default URL; operators may override it
+with the explicit -Endpoint parameter.
 Every reconfiguration, including during updates/deployment, requires new manual
 password input. Ordinary restarts reuse Windows Credential Manager. The wizard
 accepts no password argument or password file. JSON stores only the URL, account,
-credential-store reference and backup preferences. Personal settings never ship
-in the fork. The helper's Read action is an internal parent-process pipe and must
+credential-store reference and backup preferences. The default destination URL ships in this personal fork at the user's request; accounts, passwords and private runtime settings do not. The helper's Read action is an internal parent-process pipe and must
 never be used as an interactive status command. Credentials stay in the main process.
 The helper's execution policy applies only to that subprocess.
 
