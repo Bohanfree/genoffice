@@ -35,13 +35,14 @@ function install({ app, ipcMain, Menu, MenuItem, dialog, BrowserWindow, shell })
   const saveConfig = () => { atomicJson(configFile, config); service.config = config; };
   const status = async () => {
     const s = service?.summary();
-    const detail = s ? [config.automaticUploadEnabled ? '自动备份已启用' : '自动备份已暂停',
+    const detail = s ? ['增强版 0.12.446.4 · 原文件名备份', config.automaticUploadEnabled ? '自动备份已启用' : '自动备份已暂停',
+      '打开后备份，保存后更新同一份文档；同名文件自动加序号。',
       `排队 ${s.queued} · 上传中 ${s.uploading} · 已备份 ${s.backedUp} · 待重试 ${s.failed} · 冲突 ${s.conflict}`,
       ...s.tasks.slice(0, 10).map(t => `${t.name}：${({ queued:'排队', uploading:'上传中', failed:'等待重试', conflict:'冲突，远端版本已保留' })[t.status] || t.status}${t.error ? ' (' + t.error + ')' : ''}`),
       ...s.errors.map(e => `${e.name}：${e.code}`),
       ...s.pausedFiles.map(name => `已暂停：${name}`),
       ...(config.excludedDirectories || []).map(dir => `已排除：${dir}`),
-      ...s.recent.slice(0, 5).map(e => `已备份：${e.name}`),
+      ...s.recent.slice(0, 5).map(e => `已备份：${e.remoteName || e.name}`),
       '本地原文件和恢复缓存保留。关闭 GenOffice 后，待传文件将在下次启动继续。'].join('\n') :
       startupError ? `备份未启动：${startupError}。请检查配置或重新配置。` : '尚未配置，请选择“配置 WebDAV”。';
     const r = await dialog.showMessageBox({ type:'info', title:'WebDAV 备份', message:'文件自动备份', detail,

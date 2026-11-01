@@ -34,11 +34,11 @@ async function server() {
     }
     if (req.method === 'DELETE') { files.delete(key); res.writeHead(204).end(); return; }
     if (req.method === 'PUT') {
-      if (key.endsWith('/latest.json') && control.conflict) { res.writeHead(412).end(); return; }
+      if (control.conflict) { res.writeHead(412).end(); return; }
       const old = files.get(key);
       if ((req.headers['if-none-match'] === '*' && old) || (req.headers['if-match'] && old?.etag !== req.headers['if-match'])) { res.writeHead(412).end(); return; }
       const item = { data, etag:'"v' + (++seq) + '"' }; files.set(key,item);
-      if (key.endsWith('/latest.json') && control.loseCommit) { control.loseCommit=false; req.socket.destroy(); return; }
+      if (control.loseCommit) { control.loseCommit=false; req.socket.destroy(); return; }
       res.writeHead(201,{ETag:item.etag}).end(); return;
     }
     if (req.method === 'HEAD') { const f=files.get(key); res.writeHead(f ? 200:404, f ? {ETag:f.etag}:{}).end(); return; }
@@ -59,7 +59,7 @@ test('disabled, excluded and paused files never snapshot or upload', async () =>
   assert.equal(await q.enqueue(f.file),false);assert.equal(uploads,0);await q.close();fs.rmSync(f.root,{recursive:true,force:true});
 });
 
-test('real WebDAV version uploads, UTF-8 names, dedup, ETag updates and immutable snapshots', async () => {
+test('readable UTF-8 documents update in place without UUID directories or manifests', async () => {
   const dav=await server(),f=fixture();const file=path.join(f.root,'公文 标题.docx');fs.writeFileSync(file,'version one');
   const q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
   try {
@@ -67,10 +67,11 @@ test('real WebDAV version uploads, UTF-8 names, dedup, ETag updates and immutabl
     assert.equal(await q.enqueue(file,'open'),false);
     const firstCount=dav.calls.length;
     fs.writeFileSync(file,'version two');assert.equal(await q.enqueue(file,'save'),true);await wait(() => q.state.history.length===2);
-    const manifestCalls=dav.calls.filter(c => c.key.endsWith('/latest.json') && c.method==='PUT');
-    assert.equal(manifestCalls.length,2);assert.equal(manifestCalls[0].headers['if-none-match'],'*');assert.ok(manifestCalls[1].headers['if-match']);
-    const manifest=JSON.parse(manifestCalls[1].data);assert.equal(manifest.originalName,'公文 标题.docx');assert.ok(!JSON.stringify(manifest).includes(f.root));
-    assert.equal([...dav.files.keys()].filter(k => !k.endsWith('/latest.json')).length,2);assert.ok(dav.calls.length>firstCount);
+    const puts=dav.calls.filter(c => c.method==='PUT');
+    assert.equal(puts.length,2);assert.equal(puts[0].headers['if-none-match'],'*');assert.ok(puts[1].headers['if-match']);
+    assert.equal(dav.files.size,1);assert.equal(decodeURIComponent([...dav.files.keys()][0]),'/target/公文 标题.docx');
+    assert.equal([...dav.files.values()][0].data.toString(),'version two');
+    assert.equal(dav.calls.filter(c => ['MKCOL','MOVE','DELETE'].includes(c.method)).length,0);
     assert.equal(fs.readFileSync(file,'utf8'),'version two');
     assert.ok(!fs.readFileSync(path.join(f.queue,'queue.json'),'utf8').includes('secret'));
   } finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
@@ -97,21 +98,31 @@ test('save during upload uses a separate snapshot, not mixed live bytes', async 
   finally {await q.close();fs.rmSync(f.root,{recursive:true,force:true});}
 });
 
-test('412 preserves uploaded version and local queued bytes, with no silent manifest overwrite', async () => {
-  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'local version');dav.control.conflict=true;
+test('remote edits retain remote content and local queued bytes without overwriting', async () => {
+  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'original');
   const q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
-  try {await q.enqueue(f.file);await wait(()=>q.state.tasks[0]?.status==='conflict');assert.equal(q.state.history.length,0);
-    assert.ok(fs.existsSync(path.join(f.queue,'snapshots',q.state.tasks[0].id+'.bin')));assert.equal([...dav.files.keys()].length,1);
-    const n=dav.calls.length;q.retry();await new Promise(r=>setTimeout(r,30));assert.equal(dav.calls.length,n);}
-  finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
+  try {
+    await q.enqueue(f.file);await wait(()=>q.state.history.length===1);
+    const remote=[...dav.files.values()][0];remote.data=Buffer.from('external edit');remote.etag='"external"';
+    fs.writeFileSync(f.file,'local edit');await q.enqueue(f.file);await wait(()=>q.state.tasks[0]?.status==='conflict');
+    assert.equal(q.state.history.length,1);assert.equal(remote.data.toString(),'external edit');
+    assert.ok(fs.existsSync(path.join(f.queue,'snapshots',q.state.tasks[0].id+'.bin')));
+    const n=dav.calls.length;q.retry();await new Promise(r=>setTimeout(r,30));assert.equal(dav.calls.length,n);
+  } finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
 });
 
-test('MOVE-less servers use conditional PUT; failed transfers retry without losing versions', async () => {
-  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'content');dav.control.fail=true;
+test('same names from folders and existing remote files get readable numeric suffixes', async () => {
+  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'local A');
+  const second=path.join(f.root,'another','sample.docx');fs.mkdirSync(path.dirname(second));fs.writeFileSync(second,'local B');
+  dav.files.set('/target/sample.docx',{data:Buffer.from('local A'),etag:'"existing"'});
   const q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
-  try {await q.enqueue(f.file);await wait(()=>q.state.tasks[0]?.status==='failed');dav.control.fail=false;dav.control.noMove=true;q.retry();await wait(()=>q.state.history.length===1);
-    assert.equal([...dav.files.keys()].filter(k=>k.includes('.upload-')).length,0);assert.ok(dav.calls.some(c=>c.method==='DELETE'));}
-  finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
+  try {
+    await q.enqueue(f.file);await wait(()=>q.state.history.length===1);
+    await q.enqueue(second);await wait(()=>q.state.history.length===2);
+    assert.deepEqual([...dav.files.keys()].map(decodeURIComponent),['/target/sample.docx','/target/sample (2).docx','/target/sample (3).docx']);
+    fs.writeFileSync(second,'local B updated');await q.enqueue(second);await wait(()=>q.state.history.length===3);
+    assert.equal(dav.files.size,3);assert.equal(dav.files.get('/target/sample%20(3).docx').data.toString(),'local B updated');
+  } finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
 });
 
 test('different destinations cannot drain an existing queue; corrupt snapshots and size limits stay local', async () => {
@@ -142,21 +153,41 @@ test('transport rejects unsafe endpoints and redirect credentials never follow a
   await assert.rejects(()=>c.request('GET',new URL('https://other.test/')),/invalid-remote-path/);
 });
 
-test('lost manifest response reconciles only the exact committed task on retry', async () => {
-  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'committed bytes');dav.control.loseCommit=true;
-  const q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
-  try {await q.enqueue(f.file);await wait(()=>q.state.tasks[0]?.status==='failed');q.retry();await wait(()=>q.state.history.length===1);
-    assert.equal(dav.files.size,2);assert.ok(dav.calls.some(c=>c.method==='GET' && c.key.endsWith('/latest.json')));}
-  finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
+test('lost PUT response recovers large binary document by streaming hash after restart', async () => {
+  const dav=await server(),f=fixture();const bytes=Buffer.alloc(2*1024*1024+17,0x81);fs.writeFileSync(f.file,bytes);dav.control.loseCommit=true;
+  let q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
+  try {
+    await q.enqueue(f.file);await wait(()=>q.state.tasks[0]?.status==='failed');await q.close();
+    q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
+    q.retry();await wait(()=>q.state.history.length===1);
+    assert.equal(dav.files.size,1);assert.ok(dav.calls.some(c=>c.method==='GET'));
+    assert.equal(dav.calls.filter(c=>c.method==='PUT').length,1);assert.deepEqual([...dav.files.values()][0].data,bytes);
+  } finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
 });
 
-test('failed transfer cleans its own temporary object and keeps the durable snapshot', async () => {
-  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'retry bytes');dav.control.failMove=true;
+test('failed upload retains snapshot and retries with the same readable name', async () => {
+  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'retry bytes');dav.control.fail=true;
   const q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
   try {await q.enqueue(f.file);await wait(()=>q.state.tasks[0]?.status==='failed');assert.equal(dav.files.size,0);
     assert.ok(fs.existsSync(path.join(f.queue,'snapshots',q.state.tasks[0].id+'.bin')));
-    dav.control.failMove=false;q.retry();await wait(()=>q.state.history.length===1);assert.equal(dav.files.size,2);}
+    dav.control.fail=false;q.retry();await wait(()=>q.state.history.length===1);assert.equal(dav.files.size,1);
+    assert.equal([...dav.files.keys()][0],'/target/sample.docx');}
   finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
+});
+
+test('schema 1 migration preserves receipts but clears old manifest identity and dedup', async () => {
+  const dav=await server(),f=fixture();fs.writeFileSync(f.file,'old backup content');
+  let q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
+  try {
+    await q.enqueue(f.file);await wait(()=>q.state.history.length===1);await q.close();
+    const old=JSON.parse(fs.readFileSync(path.join(f.queue,'queue.json')));old.schema=1;
+    for(const d of Object.values(old.documents)){delete d.remoteName;delete d.hasRemote;d.hasManifest=true;d.etag='"old-manifest"';}
+    fs.writeFileSync(path.join(f.queue,'queue.json'),JSON.stringify(old));
+    q=new BackupQueue({root:f.queue,config:{...config,endpoint:dav.endpoint},client:dav.client});
+    assert.equal(q.state.schema,2);assert.equal(q.state.history.length,1);assert.ok(fs.existsSync(path.join(f.queue,'queue-before-readable-backups.json')));
+    assert.equal(await q.enqueue(f.file),true);await wait(()=>q.state.history.length===2);
+    assert.equal(q.state.history[0].remoteName,'sample (2).docx');
+  } finally {await q.close();await dav.close();fs.rmSync(f.root,{recursive:true,force:true});}
 });
 
 test('restart cleans only orphan snapshots and rejects damaged path-bearing queue IDs', async () => {

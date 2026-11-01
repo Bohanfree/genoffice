@@ -1,7 +1,7 @@
 {
   "desktopVersion": "0.12.446",
   "platform": "win32-x64",
-  "enhancementRelease": "bohan-v0.12.446.3",
+  "enhancementRelease": "bohan-v0.12.446.4",
   "publicSourceBaseline": "v0.12.446",
   "cleanRendererHashes": {
     "docs": "536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3",
@@ -10,12 +10,12 @@
   },
   "generatedResourceHashes": {
     "app.asar": "ae1456304bc9fba520966d18c88768d8b2365366b643c6383a52c4173f7309de",
-    "bohan-webdav/bootstrap.cjs": "f3d55986c194897ee7b8c5da39a824c5161e75d92fa6dd671871daabe1b4b7bf",
-    "bohan-webdav/client.cjs": "4dd3be24bb54965c59572bf104891cd01c0eff8de968e53c59d1942b8c2ad304",
+    "bohan-webdav/bootstrap.cjs": "fdb905b7ecdc3e1492c79a204be691920bca73876e0c5bb48be0ac028cb45ae4",
+    "bohan-webdav/client.cjs": "5698fa6d7ab40576c317a43c1d5991e2a060bf2ee88d0422f5d757aa5fda758b",
     "bohan-webdav/Configure-WebDAV.ps1": "fe62ff6c12c45107f79230ada517d6ad43b29a717e2d640c0c6ed61ad93788ef",
     "bohan-webdav/credentials.ps1": "494976c1d2e9ada4e1f164a27b170540c3a4e56561c615df4f7001954602a5b5",
     "bohan-webdav/hooks.cjs": "ab33c1cce5dd2bbc22ffdc02bc24901849e38db60059bbbf2ddad197d248977f",
-    "bohan-webdav/queue.cjs": "5119678c2e709cfb7949a13a843b0af100401b3bb6cc0144db25c77bf97a33e5",
+    "bohan-webdav/queue.cjs": "0616fbdda98672c9428fcef363f3e4fee56019378d98f44d019566503dbc6140",
     "modules/docs/preload/index.js": "7af112e01de454c442035e73bbe160d5adfc15f270e7cc252c94921527d6fbc2",
     "modules/docs/renderer/assets/index-hHkjX_DW.js": "088516ee5b767991530c76f999a7b9ed8f2f5117b08c62b89396b45edab54d50",
     "modules/docs/renderer/assets/official-typeset-core.mjs": "ee9d83e1a79f11e8d01aec620d71bbcd71653e85e66e122115312a33effd82b7",
@@ -42,7 +42,7 @@
     "stageTestsPassed": 3,
     "officialInstallerSHA512Verified": true,
     "officialInstallerAuthenticodeStatus": "Valid",
-    "webdavProtocolTestsPassed": 12
+    "webdavProtocolTestsPassed": 13
   },
   "runtime": {
     "isolatedProfile": true,
@@ -52,7 +52,7 @@
     "excelFormulasPreserved": true,
     "pdfManualRecognitionAndCacheRestore": true,
     "pdfUpstreamGeometryInitializationFix": true,
-    "webdav": {
+    "previousWebDAVAcceptance": {
       "isolatedProfile": true,
       "fictionalFilesOnly": true,
       "nativeDocsOpenAndSave": true,
@@ -63,6 +63,23 @@
       "statusMenuVerified": true,
       "remoteVersionsDownloadedAndSHA256Verified": 5,
       "remainingTasks": 0,
+      "passwordNeverInRepositoryOrConfig": true,
+      "configurationAlwaysRequiresManualPassword": true,
+      "enhancementRevision": 3
+    },
+    "webdav": {
+      "enhancementRevision": 4,
+      "isolatedProfile": true,
+      "fictionalFilesOnly": true,
+      "nativeDocsOpenAndSave": true,
+      "nativeSheetsOpen": true,
+      "nativePDFParsedOpen": true,
+      "windowsCredentialRead": true,
+      "schema": 2,
+      "completedOpenSaveReceipts": 4,
+      "latestDocumentsDownloadedAndSHA256Verified": 3,
+      "remainingTasks": 0,
+      "formattingPDFAndHookAssetsUnchangedFromRevision3": true,
       "passwordNeverInRepositoryOrConfig": true,
       "configurationAlwaysRequiresManualPassword": true
     }

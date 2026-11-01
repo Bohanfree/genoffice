@@ -16,6 +16,15 @@ function inside(file, root) {
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
 }
 function keyFor(file) { const p = path.resolve(file); return process.platform === 'win32' ? p.toLowerCase() : p; }
+function validName(name) { return typeof name === 'string' && name.length > 0 && name !== '.' && name !== '..' && !/[/\\\x00-\x1f]/.test(name); }
+function readableName(name, number = 1) {
+  const extension = path.extname(name), stem = path.basename(name, extension);
+  const suffix = number > 1 ? ` (${number})` : '';
+  // Keep UTF-8 path components below common WebDAV filesystem limits.
+  let base = stem || 'document';
+  while (Buffer.byteLength(base + suffix + extension) > 220) base = [...base].slice(0, -1).join('');
+  return base + suffix + extension;
+}
 
 class BackupQueue {
   constructor({ root, config, client, onChange = () => {}, clock = Date.now }) {
@@ -23,17 +32,32 @@ class BackupQueue {
     fs.mkdirSync(path.join(root, 'snapshots'), { recursive: true });
     this.file = path.join(root, 'queue.json');
     if (fs.existsSync(this.file)) this.state = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-    else this.state = { schema: 1, deviceId: randomUUID(), documents: {}, tasks: [], history: [], errors: [] };
+    else this.state = { schema: 2, deviceId: randomUUID(), documents: {}, tasks: [], history: [], errors: [] };
     const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value);
-    if (this.state.schema !== 1 || !uuid(this.state.deviceId) || !this.state.documents ||
+    if (![1, 2].includes(this.state.schema) || !uuid(this.state.deviceId) || !this.state.documents ||
         !Array.isArray(this.state.tasks) || !Array.isArray(this.state.history) || !Array.isArray(this.state.errors) ||
-        !Object.entries(this.state.documents).every(([key, doc]) => path.isAbsolute(key) && uuid(doc?.id)) ||
+        !Object.entries(this.state.documents).every(([key, doc]) => path.isAbsolute(key) && uuid(doc?.id) &&
+          (doc.remoteName === undefined || validName(doc.remoteName))) ||
         !this.state.tasks.every(t => uuid(t?.id) && uuid(t.documentId) && typeof t.localKey === 'string' &&
           path.isAbsolute(t.localKey) && this.state.documents[t.localKey]?.id === t.documentId &&
           /^[a-f0-9]{64}$/.test(t.hash) && /^\.[a-z0-9]+$/.test(t.extension) &&
           typeof t.name === 'string' && path.basename(t.name) === t.name &&
           Number.isSafeInteger(t.size) && t.size >= 0 && ['queued','uploading','failed','conflict'].includes(t.status))) {
       throw new Error('unsupported-or-damaged-queue');
+    }
+    if (this.state.schema === 1) {
+      // Preserve the previous local mapping/receipts and all old remote backups.
+      // Old manifest ETags/hashes cannot describe a new directly named document.
+      const legacy = path.join(root, 'queue-before-readable-backups.json');
+      if (!fs.existsSync(legacy)) atomicJson(legacy, this.state);
+      for (const doc of Object.values(this.state.documents)) {
+        delete doc.remoteName; delete doc.nameNumber;
+        doc.etag = null; doc.lastHash = null; doc.hasRemote = false; delete doc.hasManifest;
+      }
+      for (const t of this.state.tasks) {
+        t.status = 'queued'; t.nextAttempt = 0; delete t.writeStarted;
+      }
+      this.state.schema = 2;
     }
     // Only our own unreferenced snapshots are disposable after a crash.
     const referenced = new Set(this.state.tasks.map(t => t.id + '.bin'));
@@ -53,6 +77,14 @@ class BackupQueue {
     this.persist();
   }
   persist() { atomicJson(this.file, this.state); try { this.onChange(this.summary()); } catch {} }
+  assignName(doc, original, next = false) {
+    if (doc.remoteName && !next) return doc.remoteName;
+    let number = next ? (doc.nameNumber || 1) + 1 : 1, name;
+    const used = new Set(Object.values(this.state.documents).filter(d => d !== doc).map(d => d.remoteName?.normalize('NFC').toLowerCase()));
+    do { name = readableName(original, number++); } while (used.has(name.normalize('NFC').toLowerCase()));
+    doc.remoteName = name; doc.nameNumber = number - 1;
+    return name;
+  }
   eligible(file) {
     return this.config.automaticUploadEnabled === true && !this.stopped && path.isAbsolute(file) &&
       !inside(file, this.root) && ![...(this.config.excludedDirectories || [])].some(r => inside(file, r)) &&
@@ -87,7 +119,7 @@ class BackupQueue {
       const after = await handle.stat();
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || count !== before.size) throw new Error('file-changed-during-snapshot');
       const digest = hash.digest('hex'), key = keyFor(file);
-      const doc = this.state.documents[key] ||= { id: randomUUID(), lastHash: null, etag: null, hasManifest: false };
+      const doc = this.state.documents[key] ||= { id: randomUUID(), lastHash: null, etag: null, hasRemote: false };
       const tail = this.state.tasks.filter(t => t.documentId === doc.id).at(-1);
       if ((tail ? tail.hash : doc.lastHash) === digest) return false;
       const snapshot = path.join(this.root, 'snapshots', id + '.bin');
@@ -117,10 +149,14 @@ class BackupQueue {
           // Rehash durable bytes before transmission: corrupted local queue files never upload.
           const hash = createHash('sha256'); for await (const chunk of fs.createReadStream(snapshot)) hash.update(chunk);
           if (hash.digest('hex') !== task.hash) throw new Error('snapshot-corrupt');
-          const result = await this.client.upload(task, snapshot, { deviceId: this.state.deviceId,
-            expectedEtag: doc.etag, hasManifest: doc.hasManifest, signal: this.abort.signal });
-          doc.lastHash = task.hash; doc.etag = result.etag; doc.hasManifest = true;
-          this.state.history.unshift({ name: task.name, hash: task.hash, time: new Date(this.clock()).toISOString(), remote: result.remote });
+          const remoteName = this.assignName(doc, task.name); this.persist();
+          const result = await this.client.upload(task, snapshot, { remoteName,
+            expectedEtag: doc.etag, hasRemote: doc.hasRemote, signal: this.abort.signal,
+            onWriteStarted: () => { task.writeStarted = true; this.persist(); },
+            onCollision: () => { delete task.writeStarted; const name = this.assignName(doc, task.name, true); this.persist(); return name; }
+          });
+          doc.lastHash = task.hash; doc.etag = result.etag; doc.hasRemote = true;
+          this.state.history.unshift({ name: task.name, remoteName:doc.remoteName, hash: task.hash, time: new Date(this.clock()).toISOString(), remote: result.remote });
           this.state.history = this.state.history.slice(0, 100);
           this.state.tasks = this.state.tasks.filter(t => t.id !== task.id); this.persist();
           await fs.promises.unlink(snapshot).catch(() => {});
@@ -135,7 +171,7 @@ class BackupQueue {
   start() { void this.pump(); this.timer = setInterval(() => void this.pump(), 5000); this.timer.unref?.(); }
   retry() { for (const t of this.state.tasks) if (t.status === 'failed') t.nextAttempt = 0; this.persist(); void this.pump(); }
   pauseDocument(file, paused) {
-    const key = keyFor(file); const doc = this.state.documents[key] ||= { id: randomUUID(), lastHash: null, hasManifest: false, etag: null };
+    const key = keyFor(file); const doc = this.state.documents[key] ||= { id: randomUUID(), lastHash: null, hasRemote: false, etag: null };
     doc.paused = paused; this.persist();
     if (paused) this.abort?.abort(); else void this.pump();
   }
