@@ -56,8 +56,12 @@ jobs:
           from pathlib import Path
           expected = 'FN50U5tW7RPYaourAiPKzl9n6DSRoA69Mjm4rvtiG3W4cPmwz/I5IJczCfSzuIcGQztoSJDLI+aPlLlpbb1nMw=='
           assert hashlib.sha512(Path('.vendor-installer.exe').read_bytes()).digest() == base64.b64decode(expected)
+          data = Path('.vendor-installer.exe').read_bytes()
+          offset = data.find(bytes.fromhex('377abcaf271c'))
+          assert offset > 0, 'Embedded 7z archive not found'
+          Path('.vendor-payload.7z').write_bytes(data[offset:])
           PY
-          7z x -y -o.vendor .vendor-installer.exe 'resources/modules/docs/renderer/assets/index-hHkjX_DW.js' 'resources/modules/sheets/renderer/assets/index-ayY7qpCu.js' 'resources/modules/sheets/main/index.js' 'resources/modules/pdf/renderer/assets/index-H9Qe9zLW.js'
+          7z x -t7z -y -o.vendor .vendor-payload.7z 'resources/modules/docs/renderer/assets/index-hHkjX_DW.js' 'resources/modules/sheets/renderer/assets/index-ayY7qpCu.js' 'resources/modules/sheets/main/index.js' 'resources/modules/pdf/renderer/assets/index-H9Qe9zLW.js'
       - name: Verify generated files and native preservation behavior
         run: |
           python3 bohan-enhancements/stage.py --version 0.12.446 --resources .vendor/resources --output .overlay
