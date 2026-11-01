@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        adapter: ["0.12.29", "0.12.117"]
+        adapter: ["0.12.29", "0.12.117", "0.12.446"]
     env:
       BOHAN_ADAPTER_VERSION: ${{ matrix.adapter }}
     steps:
@@ -31,3 +31,56 @@ jobs:
         run: node bohan-enhancements/test.mjs
       - name: Test version and output guards
         run: python3 bohan-enhancements/tests/test-stage.py
+  windows-446-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BOHAN_ADAPTER_VERSION: '0.12.446'
+      BOHAN_BASELINE_RESOURCES: .vendor/resources
+      BOHAN_DOCS_RENDERER: .vendor/resources/modules/docs/renderer/assets/index-hHkjX_DW.js
+      BOHAN_SHEETS_RENDERER: .vendor/resources/modules/sheets/renderer/assets/index-ayY7qpCu.js
+      BOHAN_PDF_RENDERER: .overlay/modules/pdf/renderer/assets/index-H9Qe9zLW.js
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - name: Install isolated test dependencies
+        run: npm ci --ignore-scripts --workspaces=false --prefix bohan-enhancements
+      - name: Fetch and verify official Windows baseline
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --output .vendor-installer.exe https://cdn1.genspark.ai/user-upload-image/client/genoffice/GenOfficeSetup-v0.12.446.exe
+          python3 - <<'PY'
+          import base64, hashlib
+          from pathlib import Path
+          expected = 'FN50U5tW7RPYaourAiPKzl9n6DSRoA69Mjm4rvtiG3W4cPmwz/I5IJczCfSzuIcGQztoSJDLI+aPlLlpbb1nMw=='
+          assert hashlib.sha512(Path('.vendor-installer.exe').read_bytes()).digest() == base64.b64decode(expected)
+          PY
+          7z x -y -o.vendor .vendor-installer.exe 'resources/modules/docs/renderer/assets/index-hHkjX_DW.js' 'resources/modules/sheets/renderer/assets/index-ayY7qpCu.js' 'resources/modules/sheets/main/index.js' 'resources/modules/pdf/renderer/assets/index-H9Qe9zLW.js'
+      - name: Verify generated files and native preservation behavior
+        run: |
+          python3 bohan-enhancements/stage.py --version 0.12.446 --resources .vendor/resources --output .overlay
+          node bohan-enhancements/test.mjs
+          python3 bohan-enhancements/tests/test-stage.py
+  release-recipe:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/bohan'
+    needs: [portable-tests, windows-446-compatibility]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Publish versioned enhancement source only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag=bohan-v0.12.446.1
+          asset=bohan-enhancements-windows-0.12.446.1-source.zip
+          git archive --format=zip --output="$asset" HEAD bohan-enhancements LICENSE
+          sha256sum "$asset" > "$asset.sha256"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" "$asset" "$asset.sha256" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'Bohan enhancements: Windows GenOffice 0.12.446' --notes-file bohan-enhancements/RELEASE-0.12.446.md
+          fi

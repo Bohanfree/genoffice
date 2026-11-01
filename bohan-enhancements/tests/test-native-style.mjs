@@ -10,6 +10,7 @@ const adapterVersion = process.env.BOHAN_ADAPTER_VERSION ?? '0.12.29'
 const baselines = {
   '0.12.29': 'cd03b813680981ce46769bc245d254dfbe4ecef48546fee8412baa663b76131a',
   '0.12.117': 'f70f46c222f2b56c2c2d667ebfeb22f9fecf9e4becc3e12c95c1d57c7239447a',
+  '0.12.446': 'd2e968d1ac0d312a5276e31f39f43988a739617cbd5828259ad9166fae159300',
 }
 assert.ok(baselines[adapterVersion], 'Unsupported adapter version')
 const source = readFileSync(process.env.BOHAN_SHEETS_RENDERER, 'utf8')

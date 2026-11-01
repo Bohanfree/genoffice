@@ -1,6 +1,6 @@
 # Bohan Office enhancements
 
-Versioned enhancements for **macOS GenOffice 0.12.29 and 0.12.117**, maintained in the `bohan` branch of [Bohanfree/genoffice](https://github.com/Bohanfree/genoffice). The independent public-document skill stays at [genoffice-official-typeset-skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
+Versioned enhancements for **Windows x64 GenOffice 0.12.446** and **macOS GenOffice 0.12.29 and 0.12.117**, maintained in the `bohan` branch of [Bohanfree/genoffice](https://github.com/Bohanfree/genoffice). The independent public-document skill stays at [genoffice-official-typeset-skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
 
 ## Supported baselines
 
@@ -8,6 +8,32 @@ Versioned enhancements for **macOS GenOffice 0.12.29 and 0.12.117**, maintained 
 | --- | --- | --- | --- |
 | `v0.12.29` | Official macOS 0.12.29 | GitHub `v0.12.29` | 12 renderer/helper files |
 | `v0.12.117` | Official macOS 0.12.117 from the vendor's company CDN update feed | GitHub `v0.12.115` | 12 renderer/helper files + `app.asar` |
+| `v0.12.446` | Official Windows x64 0.12.446 | GitHub `v0.12.446` | 12 renderer/helper files; official host unchanged |
+
+### Windows 0.12.446 update
+
+Update this fork first, verify the new adapter, publish the recipe, then download the recipe from this fork before updating the installed application. Official application updates replace renderer customizations; apply the matching overlay before using the updated app.
+
+The Windows adapter retains official-document formatting, Word/Excel table beautification and manual PDF OCR with local cache reuse. Native shipped Docs and Sheets helper tests pass against the Windows assets. The macOS-only 117 SMB host patch is not applied on Windows. Previous adapters stay pinned. The official installer is fetched separately from the vendor and is not redistributed here.
+
+Pinned Windows x64 baseline:
+
+- Version: `0.12.446`; source tag: `v0.12.446`.
+- Installer: `https://cdn1.genspark.ai/user-upload-image/client/genoffice/GenOfficeSetup-v0.12.446.exe`.
+- SHA-512 (base64): `FN50U5tW7RPYaourAiPKzl9n6DSRoA69Mjm4rvtiG3W4cPmwz/I5IJczCfSzuIcGQztoSJDLI+aPlLlpbb1nMw==`.
+
+With Python 3.10+, generate the overlay from clean Windows resources:
+
+```powershell
+$env:PYTHONUTF8 = '1'
+python bohan-enhancements/stage.py --version 0.12.446 --resources 'C:\path\to\clean\resources' --output 'C:\path\to\new\overlay'
+```
+
+Save and quit GenOffice, back up the installed app and its user-data directory, install the verified official baseline, quit it if the installer launches it, and copy each of the 12 manifest files to the matching `resources` path. Verify destination SHA-256 values against `bohan-overlay.json`, then launch. Preserve the backup for rollback. `stage.py` never modifies the input app. The manifest records `platform: win32-x64`; other platforms and versions require separately pinned adapters.
+
+WebDAV automatic backup remains a proposal in [WEBDAV-PLAN.md](WEBDAV-PLAN.md). This release does not upload opened documents or add remote credentials.
+
+### Historical 0.12.117 baseline
 
 The vendor's update feed distributes **0.12.117**, while its latest public source/release tag at the time of this adaptation is **v0.12.115**. The fork merges that public source tag; the 117 overlay is separately pinned to the exact shipped macOS assets and archive hashes. It does not treat the public 115 source as an exact copy of the 117 package. The 29 adapter remains frozen for older installations.
 

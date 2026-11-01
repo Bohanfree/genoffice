@@ -1,0 +1,45 @@
+{
+  "desktopVersion": "0.12.446",
+  "platform": "win32-x64",
+  "enhancementRelease": "bohan-v0.12.446.1",
+  "publicSourceBaseline": "v0.12.446",
+  "cleanRendererHashes": {
+    "docs": "536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3",
+    "sheets": "d2e968d1ac0d312a5276e31f39f43988a739617cbd5828259ad9166fae159300",
+    "pdf": "64cac6fe9a2c1d98c22cc8c68ab9c5de52748715e6710aa4af1e23e2e28a0986"
+  },
+  "generatedResourceHashes": {
+    "modules/docs/renderer/assets/index-hHkjX_DW.js": "573bc42599b68b9e09cea5670bb5d573c5d7ac6b70e311574e4dac247ebff67f",
+    "modules/docs/renderer/assets/official-typeset-core.mjs": "ee9d83e1a79f11e8d01aec620d71bbcd71653e85e66e122115312a33effd82b7",
+    "modules/docs/renderer/assets/official-typeset-ui.mjs": "f3ac47f9d53cf29886df86742559d854e8c80d192217288ce2e1217a98f4fa62",
+    "modules/docs/renderer/assets/wps-word-presets.json": "87335018f5073edc2d5c6ee380e7b3bb109c83b44ce090c10b8d2a52c4539e43",
+    "modules/docs/renderer/assets/wps-word-table-adapter.mjs": "a994fd3d5b824bbe8df9ebcdb58dd48cad1122b8b314c9f2a899608f39ad923c",
+    "modules/docs/renderer/assets/wps-word-table-core.mjs": "e0a5a524a3a166cfff0f3bab46e48255b1623087e0bb47e669deb98cfff3676b",
+    "modules/docs/renderer/assets/wps-word-table-ui.mjs": "fb05d94014b63b5ae55a3cf78e48c8b5824dfe27eb4e69b638788714df2a3ab0",
+    "modules/pdf/renderer/assets/index-H9Qe9zLW.js": "6a52d77770011807f1084c9c3a1f5036dafd57e1ba37dc5cc7c366c1710b50df",
+    "modules/sheets/renderer/assets/index-ayY7qpCu.js": "27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67",
+    "modules/sheets/renderer/assets/wps-presets.json": "4721ceb9585a29d6bd621536a2fb0629f133d1046936829778bed8c054131af9",
+    "modules/sheets/renderer/assets/wps-table-beautify-core.mjs": "7af2524b9d1e944fdea691baa9f81cafabfea53d0c4c89c827f9032610d1def3",
+    "modules/sheets/renderer/assets/wps-table-beautify-ui.mjs": "2c081ebd8369edd7289b091a0d949d6633c1c7bd142a501b69a5319b142bdefe"
+  },
+  "checks": {
+    "portableAdapters": [
+      "0.12.29",
+      "0.12.117",
+      "0.12.446"
+    ],
+    "styleCells": 600,
+    "nativeDocsSheetsPDFTestsPassed": true,
+    "stageTestsPassed": 3,
+    "officialInstallerSHA512Verified": true,
+    "officialInstallerAuthenticodeStatus": "Valid"
+  },
+  "runtime": {
+    "isolatedProfile": true,
+    "officialLayoutDialogAndParagraphPreview": true,
+    "missingTitleFontIsReported": true,
+    "fullApplySaveReopenAcceptance": "pending"
+  },
+  "installedOnUserMachine": false,
+  "publicArtifacts": "Enhancement source, recipes, tests and checksums only; no official installers, user files, credentials or test profile."
+}

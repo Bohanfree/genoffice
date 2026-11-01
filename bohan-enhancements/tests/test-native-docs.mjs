@@ -32,7 +32,7 @@ assert.equal(native.blockText(doc.firstChild.toJSON()), '关于测试的通知')
 assert.deepEqual(native.topLevelBlocks(doc).map(({ node }) => native.blockText$1(node)),
   ['关于测试的通知', '原始正文', '保留对象 图示说明'])
 
-const source = readFileSync(new URL('../adapters/v0.12.117/official-host.txt', import.meta.url), 'utf8')
+const source = readFileSync(new URL(`../adapters/v${process.env.BOHAN_ADAPTER_VERSION ?? '0.12.117'}/official-host.txt`, import.meta.url), 'utf8')
 let dialog, status = ''
 const snapshot = doc.toJSON()
 const editor = { isEditable: true, state: { doc } }
@@ -55,4 +55,4 @@ assert.equal(status, '')
 assert.ok(dialog, 'Real ProseMirror blocks must reach the public-document dialog')
 assert.deepEqual(Array.from(dialog.blocks, (b) => b.text), ['关于测试的通知', '原始正文', '保留对象 图示说明'])
 assert.deepEqual(doc.toJSON(), snapshot)
-console.log('PASS: 117 shipped JSON/ProseMirror readers distinguished; real ProseMirror heading, paragraph and protected object reach the official dialog unchanged.')
+console.log('PASS: shipped JSON/ProseMirror readers distinguished; real ProseMirror heading, paragraph and protected object reach the official dialog unchanged.')

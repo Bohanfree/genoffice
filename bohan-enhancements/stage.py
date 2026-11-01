@@ -28,6 +28,21 @@ EXPECTED_RENDERERS = {
 
 # Each adapter is pinned to the exact clean macOS vendor build.
 VERSIONS = {
+    '0.12.446': {
+        'names': {'docs': 'index-hHkjX_DW.js', 'sheets': 'index-ayY7qpCu.js', 'pdf': 'index-H9Qe9zLW.js'},
+        'baselines': {
+            'docs': '536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3',
+            'sheets': 'd2e968d1ac0d312a5276e31f39f43988a739617cbd5828259ad9166fae159300',
+            'pdf': '64cac6fe9a2c1d98c22cc8c68ab9c5de52748715e6710aa4af1e23e2e28a0986',
+        },
+        'expected': {
+            'docs': '573bc42599b68b9e09cea5670bb5d573c5d7ac6b70e311574e4dac247ebff67f',
+            'sheets': '27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67',
+            'pdf': '6a52d77770011807f1084c9c3a1f5036dafd57e1ba37dc5cc7c366c1710b50df',
+        },
+        'release': 'bohan-v0.12.446.1', 'platform': 'win32-x64',
+        'sourceBaseline': 'v0.12.446',
+    },
     '0.12.29': {
         'names': NAMES, 'baselines': BASELINES, 'expected': EXPECTED_RENDERERS,
         'release': 'bohan-v0.12.29.1',
@@ -70,7 +85,7 @@ def stage(resources, output, version=None):
             selected = candidate
             break
     if selected is None:
-        raise ValueError('unsupported or already modified renderer; supply a clean supported macOS app.')
+        raise ValueError('unsupported or already modified renderer; supply a clean supported desktop app.')
     config = VERSIONS[selected]
     sources = {m: p.read_text(encoding='utf-8') for m, p in paths.items()}
     spec = importlib.util.spec_from_file_location('bohan_adapter', ROOT / f'adapters/v{selected}/patches.py')
@@ -112,7 +127,8 @@ def stage(resources, output, version=None):
         files = {p.relative_to(dest).as_posix(): digest(p.read_bytes()) for p in sorted(dest.rglob('*')) if p.is_file()}
         (dest / 'bohan-overlay.json').write_text(json.dumps({
             'release': config['release'], 'upstreamVersion': selected,
-            'sourceBaseline': 'v0.12.115' if selected == '0.12.117' else 'v0.12.29',
+            'sourceBaseline': config.get('sourceBaseline', 'v0.12.115' if selected == '0.12.117' else 'v0.12.29'),
+            'platform': config.get('platform', 'darwin'),
             'baselineRenderers': config['baselines'], 'files': files,
         }, indent=2) + '\n', encoding='utf-8')
         dest.rename(output)
@@ -121,7 +137,7 @@ def stage(resources, output, version=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--resources', type=Path, required=True, help='Clean supported macOS Contents/Resources directory')
+    parser.add_argument('--resources', type=Path, required=True, help='Clean supported desktop Resources directory')
     parser.add_argument('--output', type=Path, required=True, help='New output directory outside Resources')
     parser.add_argument('--version', choices=VERSIONS, help='Require this adapter; otherwise detect exact baseline hashes')
     args = parser.parse_args()

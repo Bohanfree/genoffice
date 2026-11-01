@@ -74,7 +74,7 @@ class StageTests(unittest.TestCase):
             config = module.VERSIONS[version]
             self.assertEqual(len(files), 13 if version == '0.12.117' else 12)
             self.assertEqual(manifest['release'], f'bohan-v{version}.1')
-            self.assertEqual(manifest['sourceBaseline'], 'v0.12.115' if version == '0.12.117' else 'v0.12.29')
+            self.assertEqual(manifest['sourceBaseline'], config.get('sourceBaseline', 'v0.12.115' if version == '0.12.117' else 'v0.12.29'))
             self.assertEqual(set(files), set(manifest['files']))
             for app, expected in config['expected'].items():
                 name = f"modules/{app}/renderer/assets/{config['names'][app]}"

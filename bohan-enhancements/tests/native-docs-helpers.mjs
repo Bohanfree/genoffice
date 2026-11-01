@@ -9,7 +9,9 @@ import { TableMap, CellSelection } from 'prosemirror-tables'
 export function nativeDocsHelpers(path) {
   const source = readFileSync(path, 'utf8')
   assert.equal(createHash('sha256').update(source).digest('hex'),
-    '3628cbe61e08bc9b898c531cca62b0ad8d52752e657f2402046b8aab68b1019d')
+    process.env.BOHAN_ADAPTER_VERSION === '0.12.446'
+      ? '536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3'
+      : '3628cbe61e08bc9b898c531cca62b0ad8d52752e657f2402046b8aab68b1019d')
   const between = (start, end) => {
     const at = source.indexOf(start)
     assert(at >= 0, start)
