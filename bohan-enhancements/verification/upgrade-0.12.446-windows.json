@@ -1,7 +1,7 @@
 {
   "desktopVersion": "0.12.446",
   "platform": "win32-x64",
-  "enhancementRelease": "bohan-v0.12.446.2",
+  "enhancementRelease": "bohan-v0.12.446.3",
   "publicSourceBaseline": "v0.12.446",
   "cleanRendererHashes": {
     "docs": "536c67aa6459bb0c912aa866841b586cbd8b158b6cb68fd0ec1c42a67f27c2e3",
@@ -9,14 +9,23 @@
     "pdf": "64cac6fe9a2c1d98c22cc8c68ab9c5de52748715e6710aa4af1e23e2e28a0986"
   },
   "generatedResourceHashes": {
-    "modules/docs/renderer/assets/index-hHkjX_DW.js": "573bc42599b68b9e09cea5670bb5d573c5d7ac6b70e311574e4dac247ebff67f",
+    "app.asar": "ae1456304bc9fba520966d18c88768d8b2365366b643c6383a52c4173f7309de",
+    "bohan-webdav/bootstrap.cjs": "f3d55986c194897ee7b8c5da39a824c5161e75d92fa6dd671871daabe1b4b7bf",
+    "bohan-webdav/client.cjs": "4dd3be24bb54965c59572bf104891cd01c0eff8de968e53c59d1942b8c2ad304",
+    "bohan-webdav/Configure-WebDAV.ps1": "fe62ff6c12c45107f79230ada517d6ad43b29a717e2d640c0c6ed61ad93788ef",
+    "bohan-webdav/credentials.ps1": "494976c1d2e9ada4e1f164a27b170540c3a4e56561c615df4f7001954602a5b5",
+    "bohan-webdav/hooks.cjs": "ab33c1cce5dd2bbc22ffdc02bc24901849e38db60059bbbf2ddad197d248977f",
+    "bohan-webdav/queue.cjs": "5119678c2e709cfb7949a13a843b0af100401b3bb6cc0144db25c77bf97a33e5",
+    "modules/docs/preload/index.js": "7af112e01de454c442035e73bbe160d5adfc15f270e7cc252c94921527d6fbc2",
+    "modules/docs/renderer/assets/index-hHkjX_DW.js": "088516ee5b767991530c76f999a7b9ed8f2f5117b08c62b89396b45edab54d50",
     "modules/docs/renderer/assets/official-typeset-core.mjs": "ee9d83e1a79f11e8d01aec620d71bbcd71653e85e66e122115312a33effd82b7",
     "modules/docs/renderer/assets/official-typeset-ui.mjs": "f3ac47f9d53cf29886df86742559d854e8c80d192217288ce2e1217a98f4fa62",
     "modules/docs/renderer/assets/wps-word-presets.json": "87335018f5073edc2d5c6ee380e7b3bb109c83b44ce090c10b8d2a52c4539e43",
     "modules/docs/renderer/assets/wps-word-table-adapter.mjs": "a994fd3d5b824bbe8df9ebcdb58dd48cad1122b8b314c9f2a899608f39ad923c",
     "modules/docs/renderer/assets/wps-word-table-core.mjs": "e0a5a524a3a166cfff0f3bab46e48255b1623087e0bb47e669deb98cfff3676b",
     "modules/docs/renderer/assets/wps-word-table-ui.mjs": "fb05d94014b63b5ae55a3cf78e48c8b5824dfe27eb4e69b638788714df2a3ab0",
-    "modules/pdf/renderer/assets/index-H9Qe9zLW.js": "2fbfe75391084c6718c0ee9555120ec5a0654c61ee8e9c0f1ef9d5937a98677a",
+    "modules/pdf/preload/index.js": "d21f21a4e8b46b94133d4418cc3f9f2453b8ee575b20d9a066fc17ef238f45ed",
+    "modules/pdf/renderer/assets/index-H9Qe9zLW.js": "c910b72cae9e9455201166ca2cb095e603123f09be3aaab5d1715dcaa446ede2",
     "modules/sheets/renderer/assets/index-ayY7qpCu.js": "27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67",
     "modules/sheets/renderer/assets/wps-presets.json": "4721ceb9585a29d6bd621536a2fb0629f133d1046936829778bed8c054131af9",
     "modules/sheets/renderer/assets/wps-table-beautify-core.mjs": "7af2524b9d1e944fdea691baa9f81cafabfea53d0c4c89c827f9032610d1def3",
@@ -32,7 +41,8 @@
     "nativeDocsSheetsPDFTestsPassed": true,
     "stageTestsPassed": 3,
     "officialInstallerSHA512Verified": true,
-    "officialInstallerAuthenticodeStatus": "Valid"
+    "officialInstallerAuthenticodeStatus": "Valid",
+    "webdavProtocolTestsPassed": 12
   },
   "runtime": {
     "isolatedProfile": true,
@@ -41,7 +51,21 @@
     "fullApplySaveReopenAcceptance": "Word apply/save and OOXML inspection passed; Excel apply/save and formula inspection passed; PDF OCR result restored after restart and cache reused.",
     "excelFormulasPreserved": true,
     "pdfManualRecognitionAndCacheRestore": true,
-    "pdfUpstreamGeometryInitializationFix": true
+    "pdfUpstreamGeometryInitializationFix": true,
+    "webdav": {
+      "isolatedProfile": true,
+      "fictionalFilesOnly": true,
+      "nativeDocsOpenAndSave": true,
+      "nativeSheetsOpenAndSave": true,
+      "nativePDFParsedOpen": true,
+      "windowsCredentialRead": true,
+      "queueRestartResumed": true,
+      "statusMenuVerified": true,
+      "remoteVersionsDownloadedAndSHA256Verified": 5,
+      "remainingTasks": 0,
+      "passwordNeverInRepositoryOrConfig": true,
+      "configurationAlwaysRequiresManualPassword": true
+    }
   },
   "installedOnUserMachine": false,
   "publicArtifacts": "Enhancement source, recipes, tests and checksums only; no official installers, user files, credentials or test profile."

@@ -111,3 +111,6 @@ source = source[:memo_start] + source[memo_end:]
 anchor = '  pageGeomRef.current = pageGeom;\n'
 assert source.count(anchor) == 1
 source = source.replace(anchor, anchor + memo.replace('[ocrPages]);', '[ocrPages, pageGeom]);'), 1)
+
+# PDF.js has accepted/decrypted the document before this acknowledgement.
+replace_once('      setDoc(loaded);', '      setDoc(loaded);\n      window.bohanBackup?.opened(path);')

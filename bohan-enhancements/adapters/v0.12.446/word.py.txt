@@ -22,3 +22,7 @@ button='''
               }),'''
 s=s.replace(anchor,anchor+button)
 if 'import {openOfficialDialog}' not in s or 'onOfficialTypeset' not in s:raise SystemExit('Official-typeset patch missing')
+
+assert s.count('    const outcome = await loadFile(fileCtxRef.current, result);') == 1
+# Acknowledge only a successfully parsed document; main owns the candidate path.
+s=s.replace('    const outcome = await loadFile(fileCtxRef.current, result);', '    const outcome = await loadFile(fileCtxRef.current, result);\n    if (outcome === "ok") window.bohanBackup?.opened(result.path);')

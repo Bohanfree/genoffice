@@ -61,7 +61,7 @@ jobs:
           assert offset > 0, 'Embedded 7z archive not found'
           Path('.vendor-payload.7z').write_bytes(data[offset:])
           PY
-          7z x -t7z -y -o.vendor .vendor-payload.7z 'resources/modules/docs/renderer/assets/index-hHkjX_DW.js' 'resources/modules/sheets/renderer/assets/index-ayY7qpCu.js' 'resources/modules/sheets/main/index.js' 'resources/modules/pdf/renderer/assets/index-H9Qe9zLW.js'
+          7z x -t7z -y -o.vendor .vendor-payload.7z 'resources/modules/docs/renderer/assets/index-hHkjX_DW.js' 'resources/modules/sheets/renderer/assets/index-ayY7qpCu.js' 'resources/modules/sheets/main/index.js' 'resources/modules/pdf/renderer/assets/index-H9Qe9zLW.js' 'resources/app.asar' 'resources/modules/docs/preload/index.js' 'resources/modules/pdf/preload/index.js'
       - name: Verify generated files and native preservation behavior
         run: |
           python3 bohan-enhancements/stage.py --version 0.12.446 --resources .vendor/resources --output .overlay
@@ -81,8 +81,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          tag=bohan-v0.12.446.2
-          asset=bohan-enhancements-windows-0.12.446.2-source.zip
+          tag=bohan-v0.12.446.3
+          asset=bohan-enhancements-windows-0.12.446.3-source.zip
           git archive --format=zip --output="$asset" HEAD bohan-enhancements LICENSE
           sha256sum "$asset" > "$asset.sha256"
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

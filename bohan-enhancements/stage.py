@@ -36,11 +36,11 @@ VERSIONS = {
             'pdf': '64cac6fe9a2c1d98c22cc8c68ab9c5de52748715e6710aa4af1e23e2e28a0986',
         },
         'expected': {
-            'docs': '573bc42599b68b9e09cea5670bb5d573c5d7ac6b70e311574e4dac247ebff67f',
+            'docs': '088516ee5b767991530c76f999a7b9ed8f2f5117b08c62b89396b45edab54d50',
             'sheets': '27cb15980364e0348563414d426019a943267a70a56c16624f57edb393759c67',
-            'pdf': '2fbfe75391084c6718c0ee9555120ec5a0654c61ee8e9c0f1ef9d5937a98677a',
+            'pdf': 'c910b72cae9e9455201166ca2cb095e603123f09be3aaab5d1715dcaa446ede2',
         },
-        'release': 'bohan-v0.12.446.2', 'platform': 'win32-x64',
+        'release': 'bohan-v0.12.446.3', 'platform': 'win32-x64',
         'sourceBaseline': 'v0.12.446',
     },
     '0.12.29': {
@@ -98,6 +98,12 @@ def stage(resources, output, version=None):
         stage_main = importlib.util.module_from_spec(spec_main)
         spec_main.loader.exec_module(stage_main)
         main_archive = stage_main.patch_asar((resources / 'app.asar').read_bytes())
+    if selected == '0.12.446':
+        import sys
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        import stage_webdav
+        main_archive = stage_webdav.patch_asar((resources / 'app.asar').read_bytes())
     rendered = {
         'docs': patches.patch_word(patches.patch_official(sources['docs'])),
         'sheets': patches.patch_sheets(sources['sheets']),
@@ -124,6 +130,13 @@ def stage(resources, output, version=None):
             shutil.copyfile(ROOT / 'tables' / name, docs / name)
         for name in ('wps-table-beautify-core.mjs', 'wps-table-beautify-ui.mjs', 'wps-presets.json'):
             shutil.copyfile(ROOT / 'tables' / name, sheets / name)
+        if selected == '0.12.446':
+            for module in ('docs', 'pdf'):
+                relative = Path('modules') / module / 'preload/index.js'
+                target = dest / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(stage_webdav.preload_bytes(module, (resources / relative).read_bytes()))
+            shutil.copytree(ROOT / 'webdav', dest / 'bohan-webdav', ignore=shutil.ignore_patterns('__pycache__'))
         files = {p.relative_to(dest).as_posix(): digest(p.read_bytes()) for p in sorted(dest.rglob('*')) if p.is_file()}
         (dest / 'bohan-overlay.json').write_text(json.dumps({
             'release': config['release'], 'upstreamVersion': selected,

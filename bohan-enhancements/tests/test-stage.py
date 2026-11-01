@@ -72,8 +72,8 @@ class StageTests(unittest.TestCase):
             manifest = json.loads((output / 'bohan-overlay.json').read_text())
             version = manifest['upstreamVersion']
             config = module.VERSIONS[version]
-            self.assertEqual(len(files), 13 if version == '0.12.117' else 12)
-            self.assertEqual(manifest['release'], f'bohan-v{version}.2' if version == '0.12.446' else f'bohan-v{version}.1')
+            self.assertEqual(len(files), 13 if version == '0.12.117' else 21 if version == '0.12.446' else 12)
+            self.assertEqual(manifest['release'], f'bohan-v{version}.3' if version == '0.12.446' else f'bohan-v{version}.1')
             self.assertEqual(manifest['sourceBaseline'], config.get('sourceBaseline', 'v0.12.115' if version == '0.12.117' else 'v0.12.29'))
             self.assertEqual(set(files), set(manifest['files']))
             for app, expected in config['expected'].items():
@@ -92,7 +92,7 @@ class StageTests(unittest.TestCase):
             self.assertFalse(repeated.exists())
             self.assertEqual(fingerprint([output / name for name in files]), output_before)
 
-            if version == '0.12.117':
+            if version in ('0.12.117', '0.12.446'):
                 # A clean renderer set alone is insufficient: independently
                 # modified host bytes must stop staging before any writes.
                 mixed = base / 'mixed-resources'

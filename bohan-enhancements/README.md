@@ -8,7 +8,7 @@ Versioned enhancements for **Windows x64 GenOffice 0.12.446** and **macOS GenOff
 | --- | --- | --- | --- |
 | `v0.12.29` | Official macOS 0.12.29 | GitHub `v0.12.29` | 12 renderer/helper files |
 | `v0.12.117` | Official macOS 0.12.117 from the vendor's company CDN update feed | GitHub `v0.12.115` | 12 renderer/helper files + `app.asar` |
-| `v0.12.446` | Official Windows x64 0.12.446 | GitHub `v0.12.446` | 12 renderer/helper files; official host unchanged |
+| `v0.12.446` | Official Windows x64 0.12.446 | GitHub `v0.12.446` | 21 files: formatting/OCR renderers, pinned host, 2 preloads and 6 WebDAV helpers |
 
 ### Windows 0.12.446 update
 
@@ -29,9 +29,11 @@ $env:PYTHONUTF8 = '1'
 python bohan-enhancements/stage.py --version 0.12.446 --resources 'C:\path\to\clean\resources' --output 'C:\path\to\new\overlay'
 ```
 
-Save and quit GenOffice, back up the installed app and its user-data directory, install the verified official baseline, quit it if the installer launches it, and copy each of the 12 manifest files to the matching `resources` path. Verify destination SHA-256 values against `bohan-overlay.json`, then launch. Preserve the backup for rollback. `stage.py` never modifies the input app. The manifest records `platform: win32-x64`; other platforms and versions require separately pinned adapters.
+Save and quit GenOffice, back up the installed app and its user-data directory, install the verified official baseline, quit it if the installer launches it, and copy all 21 manifest files to the matching `resources` paths. Verify destination SHA-256 values against `bohan-overlay.json`, then launch. Preserve the backup for rollback. `stage.py` never modifies the input app. The manifest records `platform: win32-x64`; other platforms and versions require separately pinned adapters.
 
-WebDAV automatic backup remains a proposal in [WEBDAV-PLAN.md](WEBDAV-PLAN.md). This release does not upload opened documents or add remote credentials.
+Revision 3 adds optional WebDAV backup; see [WEBDAV-PLAN.md](WEBDAV-PLAN.md) for behavior and limits. It is disabled until configured. Open the application menu → **WebDAV 备份 → 配置 WebDAV（手动输入密码）**. Enter the HTTPS folder URL and account, manually enter the hidden password, and explicitly enable backup. Restart GenOffice. Every reconfiguration, including after an update or deployment, asks for the password again; the wizard never accepts it as an argument or imports it from a file. Ordinary restarts reuse Windows Credential Manager. The fork and release contain no personal endpoint, account or password. Keep private user-data out of source control.
+
+After opt-in, successful opens and saves queue immutable saved-file snapshots, retain local originals/recovery/OCR caches, deduplicate unchanged bytes and retry offline work after restart. The menu shows status and retry controls and supports pausing files or excluding folders. Remote versions are retained; conflicts stop that document's queue instead of overwriting another version. Only files opened or saved after opt-in trigger new snapshots; there is no recent-file backfill. The default limits are 512 MiB per file and 2 GiB pending snapshots. This is backup, with no automatic remote restore or two-way sync. Unsaved edits and OCR cache files are not uploaded.
 
 ### Historical 0.12.117 baseline
 
@@ -49,7 +51,7 @@ The new host recipe retains upstream's non-hidden temporary-file naming. Permiss
 
 ## Delivery model
 
-This release contains **enhancement source, versioned compatibility recipes, hash checks and tests**. All five packaged enhancements are applied through the overlay generator. A normal `npm run build:all` includes the fork's TypeScript SMB changes but does not inject the renderer enhancements; use the matching overlay recipe for those features. This release has no custom installer or update feed.
+This release contains **enhancement source, versioned compatibility recipes, hash checks and tests**. Packaged enhancements, including Windows WebDAV backup, are applied through the overlay generator. A normal `npm run build:all` includes the fork's TypeScript SMB changes but does not inject these overlay features; use the matching overlay recipe. This release has no custom installer or update feed.
 
 Recipes contain independently written feature logic, observable style values from fictional saved Office samples, and small Apache-2.0 upstream anchor excerpts. Release artifacts exclude official full installers, installed GenOffice bundles, generated or extracted `app.asar` archives, WPS program resources, user documents, settings, credentials and local backups. Generated overlay files are produced locally from the operator's clean official installation.
 
@@ -65,6 +67,8 @@ python3 bohan-enhancements/stage.py \
 ```
 
 Unknown, mixed or already patched inputs are rejected before output creation. For 117, the generator also verifies the complete clean `app.asar`, changes only `out/main/index.js`, recalculates archive integrity records, verifies every other member is byte-for-byte unchanged, and checks the expected final archive hash. The resulting `bohan-overlay.json` records desktop-package version, public source baseline and each generated file's SHA-256.
+
+The Windows 446 recipe independently pins its clean host archive and both affected preloads. It changes only the main ASAR member to install the backup service and observe successful native workbook operations. Docs/PDF preloads add an acknowledgement of a successfully parsed native open. Failed, cancelled and password-pending opens do not create snapshots. All other ASAR members are verified unchanged; the official executable stays intact.
 
 Before installing, save open work and back up the entire current app plus the GenOffice user-data folder. Keep a clean copy of the new official app for generating a fresh overlay and a copy of the previous customized app for rollback. On macOS, first install and launch the clean official new version once, then quit it before applying the overlay. This establishes the official first-launch state before package resources are changed. Use Finder to copy **all files listed in the overlay manifest** to their matching paths under the new app's `Contents/Resources`, preserving filenames. The 117 list includes `app.asar` as well as renderer files. Do not copy the overlay manifest over an application resource. On macOS use Finder if package writes are protected; preserve the official executable, `Info.plist` and system security settings.
 
