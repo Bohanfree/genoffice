@@ -72,8 +72,9 @@ class StageTests(unittest.TestCase):
             manifest = json.loads((output / 'bohan-overlay.json').read_text())
             version = manifest['upstreamVersion']
             config = module.VERSIONS[version]
-            self.assertEqual(len(files), 13 if version == '0.12.117' else 23 if version == '0.12.446' else 12)
-            self.assertEqual(manifest['release'], f'bohan-v{version}.7' if version == '0.12.446' else f'bohan-v{version}.1')
+            mac446 = manifest['platform'] == 'darwin-arm64'
+            self.assertEqual(len(files), 25 if mac446 else 13 if version == '0.12.117' else 23 if version == '0.12.446' else 12)
+            self.assertEqual(manifest['release'], f'bohan-v{version}.7-macos.1' if mac446 else f'bohan-v{version}.7' if version == '0.12.446' else f'bohan-v{version}.1')
             self.assertEqual(manifest['sourceBaseline'], config.get('sourceBaseline', 'v0.12.115' if version == '0.12.117' else 'v0.12.29'))
             self.assertEqual(set(files), set(manifest['files']))
             for app, expected in config['expected'].items():

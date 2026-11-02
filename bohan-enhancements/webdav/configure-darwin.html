@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; form-action 'none'">
+<title>配置 WebDAV 云文档</title>
+<style>body{font:15px -apple-system,sans-serif;margin:28px;color:#222;background:#fafafa}h1{font-size:22px}label{display:block;margin:17px 0 7px}input:not([type=checkbox]){box-sizing:border-box;width:100%;padding:10px;border:1px solid #aaa;border-radius:6px;font:inherit}button{padding:11px 22px;background:#1765cf;color:white;border:0;border-radius:6px;font:inherit}p{line-height:1.6;color:#555}#message{color:#a23}label.consent{font-size:14px;line-height:1.6}</style>
+<h1>WebDAV 云文档</h1><p>浏览云端文件、保存后同步，并保留历史版本。</p>
+<form id="setup"><label for="endpoint">WebDAV 文件夹地址</label><input id="endpoint" type="url" required>
+<label for="username">账号</label><input id="username" autocomplete="username" required>
+<label for="password">密码（每次配置均需手动输入）</label><input id="password" type="password" autocomplete="off" required>
+<label class="consent"><input id="enable" type="checkbox" required> 启用云文档，并将此后打开或保存的文档自动同步到上述文件夹。</label>
+<button id="submit" type="submit">保存并启用</button><p id="message" role="status">密码使用本机钥匙串保护的加密方式保存。</p></form>
+<script src="configure-darwin.js"></script></html>

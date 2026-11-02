@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parent
 NAMES = {
@@ -68,7 +69,7 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def stage(resources, output, version=None):
+def stage(resources, output, version=None, platform=None):
     resources, output = Path(resources).resolve(), Path(output).resolve()
     if output == resources or resources in output.parents or output in resources.parents:
         raise ValueError('Output must be separate from the input Resources tree.')
@@ -86,7 +87,11 @@ def stage(resources, output, version=None):
             break
     if selected is None:
         raise ValueError('unsupported or already modified renderer; supply a clean supported desktop app.')
-    config = VERSIONS[selected]
+    config = dict(VERSIONS[selected])
+    platform = platform or ('darwin-arm64' if sys.platform == 'darwin' and selected == '0.12.446' else config.get('platform', 'darwin'))
+    mac446 = selected == '0.12.446' and platform == 'darwin-arm64'
+    if mac446:
+        config.update(platform=platform, release='bohan-v0.12.446.7-macos.1')
     sources = {m: p.read_text(encoding='utf-8') for m, p in paths.items()}
     spec = importlib.util.spec_from_file_location('bohan_adapter', ROOT / f'adapters/v{selected}/patches.py')
     patches = importlib.util.module_from_spec(spec)
@@ -99,11 +104,14 @@ def stage(resources, output, version=None):
         spec_main.loader.exec_module(stage_main)
         main_archive = stage_main.patch_asar((resources / 'app.asar').read_bytes())
     if selected == '0.12.446':
-        import sys
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
         import stage_webdav
-        main_archive = stage_webdav.patch_asar((resources / 'app.asar').read_bytes())
+        if mac446:
+            import stage_macos
+            main_archive = stage_macos.patch_asar((resources / 'app.asar').read_bytes())
+        else:
+            main_archive = stage_webdav.patch_asar((resources / 'app.asar').read_bytes())
     rendered = {
         'docs': patches.patch_word(patches.patch_official(sources['docs'])),
         'sheets': patches.patch_sheets(sources['sheets']),
@@ -136,7 +144,10 @@ def stage(resources, output, version=None):
                 target = dest / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(stage_webdav.preload_bytes(module, (resources / relative).read_bytes()))
-            shutil.copytree(ROOT / 'webdav', dest / 'bohan-webdav', ignore=shutil.ignore_patterns('__pycache__'))
+            extra = ('Configure-WebDAV.ps1', 'credentials.ps1') if mac446 else ('*darwin*',)
+            shutil.copytree(ROOT / 'webdav', dest / 'bohan-webdav', ignore=shutil.ignore_patterns('__pycache__', *extra))
+            if mac446:
+                (dest / 'bohan-webdav/bootstrap.cjs').write_bytes(stage_macos.bootstrap_bytes())
         files = {p.relative_to(dest).as_posix(): digest(p.read_bytes()) for p in sorted(dest.rglob('*')) if p.is_file()}
         (dest / 'bohan-overlay.json').write_text(json.dumps({
             'release': config['release'], 'upstreamVersion': selected,
@@ -153,9 +164,10 @@ def main():
     parser.add_argument('--resources', type=Path, required=True, help='Clean supported desktop Resources directory')
     parser.add_argument('--output', type=Path, required=True, help='New output directory outside Resources')
     parser.add_argument('--version', choices=VERSIONS, help='Require this adapter; otherwise detect exact baseline hashes')
+    parser.add_argument('--platform', choices=['darwin-arm64', 'win32-x64'], help='446 desktop platform; defaults to the current host')
     args = parser.parse_args()
     try:
-        files = stage(args.resources, args.output, args.version)
+        files = stage(args.resources, args.output, args.version, args.platform)
     except (ValueError, FileNotFoundError, AssertionError) as error:
         parser.exit(1, f'Staging stopped: {error}\n')
     print(f'Staged {len(files)} verified files at {args.output}. Application was not modified.')

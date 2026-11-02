@@ -1,6 +1,14 @@
 # Bohan Office enhancements
 
-Versioned enhancements for **Windows x64 GenOffice 0.12.446** and **macOS GenOffice 0.12.29 and 0.12.117**, maintained in the `bohan` branch of [Bohanfree/genoffice](https://github.com/Bohanfree/genoffice). The independent public-document skill stays at [genoffice-official-typeset-skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
+Versioned enhancements for **Windows x64 and macOS ARM64 GenOffice 0.12.446**, plus historical **macOS 0.12.29 and 0.12.117** adapters. Maintained in the `bohan` branch of [Bohanfree/genoffice](https://github.com/Bohanfree/genoffice). The independent public-document skill stays at [genoffice-official-typeset-skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
+
+### macOS ARM64 0.12.446 update
+
+The Mac ARM64 official package shares the exact pinned JavaScript host, renderers and preloads with Windows 446. `stage.py --version 0.12.446 --platform darwin-arm64` generates a 25-file overlay (`bohan-v0.12.446.7-macos.1`). It reuses the formatting, font alias, table, manual OCR, cloud folder, two-way sync and version history logic, and additionally carries the validated macOS SMB error-45 fallback and EAGAIN handling from 117. The existing Windows output remains unchanged; its PowerShell helpers are excluded from the Mac overlay.
+
+On macOS, choose **WebDAV 云文档 → 配置 WebDAV（手动输入密码）**. The setup window shows the destination, account, an initially empty password field, and an explicit automatic-sync checkbox. Enter the password manually each time configuration is saved, then restart. Credentials use Electron `safeStorage` backed by macOS Keychain and are saved as ciphertext in a separate mode-0600 file; ordinary JSON configuration contains no password. Existing recovery and OCR caches remain local. Without configuration, cloud synchronization stays inactive.
+
+The official DMG is obtained separately from the upstream `v0.12.446` release: `GenOffice-0.12.446-arm64.dmg`, SHA-256 `277b2de8909484dd960131d373330f129e27654570fd6b405a041c3ec7c4390a`. Keep the prior app and closed user-data backup. Launch the clean official version once, quit it, prepare the complete enhanced app outside `/Applications`, and use Finder to replace the installed app if macOS App Management blocks resource writes. Verify every installed manifest hash before use.
 
 ## Supported baselines
 
