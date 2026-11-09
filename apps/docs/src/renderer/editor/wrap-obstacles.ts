@@ -2,7 +2,8 @@ import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { EditorView } from '@tiptap/pm/view'
-import { insideFloatTable } from './pagination-gaps'
+import { insideFloatTable, isPageTurn } from './pagination-gaps'
+import { pageReaderShadow } from '../pagination-cuts'
 import { appliedFloatShift } from './layout-health'
 import { TopLevelPositions } from './top-level-pos'
 import {
@@ -49,6 +50,9 @@ export interface ObstacleRect {
   bottom: number
   /** wrapTopAndBottom band: a pushed paragraph keeps its space-before below it */
   band?: boolean
+  /** header drawing reaching into the body: lines flow beside it one by one
+   *  (a float inside the paragraph), not the whole paragraph at one gap */
+  perLine?: boolean
 }
 
 /** smallest free row (px) between bands worth laying paragraphs into */
@@ -99,6 +103,56 @@ const SIDE_IMG_SEL = ['square', 'tight', 'through']
   .flatMap((w) => [`img.doc-inline-img--wrap-${w}-left`, `img.doc-inline-img--wrap-${w}-right`])
   .join(', ')
 
+const sideImagesOf = (el: HTMLElement): HTMLElement[] =>
+  el.getElementsByTagName('img').length === 0
+    ? []
+    : Array.from(el.querySelectorAll<HTMLElement>(SIDE_IMG_SEL)).filter(
+        (img) => !img.closest('.doc-textbox'),
+      )
+
+export interface FloatBox {
+  side: 'left' | 'right'
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/** CSS stacks a float against an earlier one its margin box meets (same side: pushed
+ *  off its posOffset X; opposite side: pushed down); Word keeps the declared position
+ *  (probe 2026-11-02, D1-D3), so such a picture takes the overlay route */
+export function floatStacks(box: FloatBox, floats: readonly FloatBox[]): boolean {
+  return floats.some(
+    (f) =>
+      f.top < box.bottom &&
+      f.bottom > box.top &&
+      (f.side === box.side || (f.left < box.right && f.right > box.left)),
+  )
+}
+
+const sideOf = (img: HTMLElement): 'left' | 'right' =>
+  img.className.includes('-right') ? 'right' : 'left'
+
+function recordFloats(
+  imgs: readonly HTMLElement[],
+  rel: (r: DOMRect) => ObstacleRect,
+  floats: FloatBox[],
+): void {
+  for (const img of imgs) {
+    const r = rel(img.getBoundingClientRect())
+    if (r.bottom <= r.top) continue
+    const [l, rr, , bt] = distOf(img)
+    const mt = parseFloat(getComputedStyle(img).marginTop) || 0
+    floats.push({
+      side: sideOf(img),
+      left: r.left - l,
+      right: r.right + rr,
+      top: r.top - mt,
+      bottom: r.bottom + bt,
+    })
+  }
+}
+
 const distOf = (el: HTMLElement): [number, number, number, number] => {
   const d = (el.dataset.wrapDist ?? '').split(' ').map(Number)
   return [d[0] || 0, d[1] || 0, d[2] || 0, d[3] || 0]
@@ -121,6 +175,17 @@ interface ParaSpec {
   base: [number, number, number]
   pad: [number, number, number]
 }
+
+/** per-line gap of a paragraph's first lines beside a header drawing */
+interface FloatSpec {
+  el: HTMLElement
+  side: 'left' | 'right'
+  width: number
+  height: number
+}
+
+/** header obstacles of a page (hfBodyObstacles): column px, y from the page's body top */
+export type HeaderObstaclesOf = (pageIdx: number) => readonly ObstacleRect[]
 
 // last values written per element: a follow-up pass is only worth scheduling
 // when this pass decided differently, not when it re-asserts a value another
@@ -147,6 +212,12 @@ export function syncWrapObstacles(
   planOf?: PlanOf,
   /** I9 shadow sink: the model obstacles against the rendered boxes */
   shadow?: ObstacleShadow,
+  /** blocks that open a page in the previous pass's cuts (block leads) with
+   *  their page index; the obstacle set is cleared in front of them. Without
+   *  it the gap widgets of that pass mark the turns */
+  pageLeads?: ReadonlyMap<Element, number>,
+  /** header drawings reaching into each page's body: seeded at every page start */
+  headerObstaclesOf?: HeaderObstaclesOf,
 ): boolean {
   const pmRect = pm.getBoundingClientRect()
   const rel = (r: DOMRect): ObstacleRect => ({
@@ -157,10 +228,41 @@ export function syncWrapObstacles(
   })
   const writes: Write[] = []
   const paras: ParaSpec[] = []
+  const lineFloats: FloatSpec[] = []
   let rects: ObstacleRect[] = []
+  const floats: FloatBox[] = []
+  // the canvas padding is the first page's margins; the header rectangles of
+  // a page are column px from its body top (the gap widget's bottom edge)
+  const pmCs = headerObstaclesOf ? getComputedStyle(pm) : null
+  const colLeftPm = pmCs ? parseFloat(pmCs.paddingLeft) || 0 : 0
+  const seedHeader = (pageIdx: number, bodyTop: number) => {
+    if (!headerObstaclesOf) return
+    for (const o of headerObstaclesOf(pageIdx)) {
+      rects.push({
+        left: o.left + colLeftPm,
+        right: o.right + colLeftPm,
+        top: o.top + bodyTop,
+        bottom: o.bottom + bodyTop,
+        perLine: true,
+      })
+    }
+  }
+  const gapBottom = (el: Element | null): number | undefined =>
+    el && isPageTurn(el) ? rel(el.getBoundingClientRect()).bottom : undefined
+  seedHeader(0, pmCs ? parseFloat(pmCs.paddingTop) || 0 : 0)
+  // a float-carry spacer (page-gap-carry) is flow space on the last portion's
+  // page, not a turn: it keeps the obstacles like any other spacer
+  let domTurns = 0
+  let cutTurns = 0
   for (const el of Array.from(pm.children) as HTMLElement[]) {
     if (el.classList.contains('page-gap')) {
-      if (!insideFloatTable(el)) rects = []
+      if (isPageTurn(el) && !insideFloatTable(el)) {
+        domTurns++
+        if (!pageLeads) {
+          rects = []
+          seedHeader(domTurns, gapBottom(el) ?? 0)
+        }
+      }
       continue
     }
     if (
@@ -170,15 +272,31 @@ export function syncWrapObstacles(
     ) {
       continue
     }
+    const leadPage = pageLeads?.get(el)
+    if (leadPage !== undefined) {
+      cutTurns++
+      rects = []
+      seedHeader(
+        leadPage,
+        gapBottom(el.previousElementSibling) ?? rel(el.getBoundingClientRect()).top,
+      )
+    }
     if (el.classList.contains('doc-protected-floating')) {
       if (el.classList.contains('doc-protected-pagepinned')) continue
       collectWrapper(el, rel, rects, writes, factor, planOf, shadow)
       continue
     }
     if (!isTextBlock(el)) continue
-    if (rects.length === 0 && el.dataset.obsMode !== '1') continue
-    placeParagraph(el, rel, rects, paras, factor)
+    const imgs = sideImagesOf(el)
+    if (rects.length === 0 && el.dataset.obsMode !== '1' && !(imgs.length && floats.length)) {
+      recordFloats(imgs, rel, floats)
+      continue
+    }
+    if (!placeParagraph(el, rel, rects, paras, lineFloats, factor, imgs, floats))
+      recordFloats(imgs, rel, floats)
   }
+  if (pageLeads && pageReaderShadow.enabled && domTurns !== cutTurns)
+    pageReaderShadow.report('obstacleTurns', domTurns, cutTurns)
   let changed = false
   for (const w of writes) {
     const sig = JSON.stringify([w.style, w.data])
@@ -210,6 +328,24 @@ export function syncWrapObstacles(
         range.to,
         { style, 'data-obs-mode': '1', 'data-obs-base': base },
         { key: `obs-${style}-${base}` },
+      ),
+    )
+  }
+  for (const f of lineFloats) {
+    const range = positions.of(f.el)
+    if (!range) continue
+    const style = `float:${f.side};width:${px(f.width)};height:${px(f.height)}`
+    decos.push(
+      Decoration.widget(
+        range.from + 1,
+        () => {
+          const span = document.createElement('span')
+          span.className = 'doc-hf-wrap-float'
+          span.contentEditable = 'false'
+          span.style.cssText = style
+          return span
+        },
+        { side: -1, key: `hf-float-${style}` },
       ),
     )
   }
@@ -676,8 +812,11 @@ function placeParagraph(
   rel: (r: DOMRect) => ObstacleRect,
   rects: ObstacleRect[],
   paras: ParaSpec[],
+  lineFloats: FloatSpec[],
   factor: number,
-): void {
+  imgs: readonly HTMLElement[],
+  floats: readonly FloatBox[],
+): boolean {
   const cs = getComputedStyle(el)
   // base = the paragraph's own padding before this pass added to it
   let base = (el.dataset.obsBase ?? '').split(' ').map(Number)
@@ -698,49 +837,75 @@ function placeParagraph(
   const top = r.top + border[0] + base[0]
   const colLeft = r.left + border[1] + base[1]
   const colRight = r.right - border[2] - base[2]
+  const lh = parseFloat(cs.lineHeight)
+  const lineH =
+    Number.isFinite(lh) && lh > 0
+      ? lh
+      : Math.max(1, r.bottom - r.top - applied - base[0] - border[0])
+  const hits = rects.filter(
+    (o) => o.top < top + lineH && o.bottom > top && o.right > colLeft && o.left < colRight,
+  )
+  const external = hits.length > 0
+  if (!external && imgs.length === 0) return false
   // summed fragment widths: layout-independent even when an earlier pass
   // left the word broken across lines in a too-narrow gap
   const word = firstWord(el)
   const needW = word
     ? Array.from(word.getClientRects()).reduce((w, r) => w + r.width, 0) / factor
     : 0
-  const lh = parseFloat(cs.lineHeight)
-  const lineH =
-    Number.isFinite(lh) && lh > 0
-      ? lh
-      : Math.max(1, r.bottom - r.top - applied - base[0] - border[0])
-  const external = rects.some(
-    (o) => o.top < top + lineH && o.bottom > top && o.right > colLeft && o.left < colRight,
-  )
-  const imgs = Array.from(el.querySelectorAll<HTMLElement>(SIDE_IMG_SEL)).filter(
-    (img) => !img.closest('.doc-textbox'),
-  )
-  if (!external) return
   // the paragraph's own run pictures become overlays at their anchor offsets
   // (data-obs-mode CSS); their rectangles join the obstacle set from here on
   const marginLeft = parseFloat(cs.getPropertyValue('--doc-margin-left')) || 0
+  const marginRight = parseFloat(cs.getPropertyValue('--doc-margin-right')) || 0
   // a column-relative X measures from the column edge, outside the paragraph's
   // start indent (margin) and list padding (WT L400)
   const colEdge = r.left - (cs.direction === 'rtl' ? 0 : parseFloat(cs.marginLeft) || 0) + border[1]
   const own: ObstacleRect[] = []
+  let stacked = false
   for (const img of imgs) {
     const b = img.getBoundingClientRect()
     if (b.height <= 0) continue
     const w = b.width / factor
     const h = b.height / factor
     const x = parseFloat(img.dataset.obsX ?? '')
+    // a posOffset X keeps the picture on the paper (probe 2026-11-02, C3)
     const left = Number.isFinite(x)
-      ? colEdge + x - (img.dataset.obsXFrom === 'page' ? marginLeft : 0)
-      : img.className.includes('-right')
+      ? Math.max(
+          colEdge - marginLeft,
+          Math.min(
+            colEdge + x - (img.dataset.obsXFrom === 'page' ? marginLeft : 0),
+            r.right - border[2] + marginRight - w,
+          ),
+        )
+      : sideOf(img) === 'right'
         ? colRight - w
         : colLeft
     const y = top + (parseFloat(img.dataset.obsY ?? '') || 0)
     const [l, rr, t, bt] = distOf(img)
-    own.push({ left: left - l, right: left + w + rr, top: y - t, bottom: y + h + bt })
+    const rect = { left: left - l, right: left + w + rr, top: y - t, bottom: y + h + bt }
+    own.push(rect)
+    // as a float its margin box would start at the line top
+    if (floatStacks({ side: sideOf(img), ...rect, top: Math.min(top, rect.top) }, floats))
+      stacked = true
   }
+  if (!external && !stacked) return false
   const all = own.length ? [...rects, ...own] : rects
   const p = placeLine(all, top, lineH, colLeft, colRight, needW)
   rects.push(...own)
+  // beside a header drawing the lines flow one by one: a float of the gap's
+  // complement, as tall as the drawing reaches, inside the paragraph; capped
+  // at the paragraph so it does not spill into the next block's lines (which
+  // take their own float when the drawing still crosses them)
+  if (!own.length && p.top === top && hits.every((o) => o.perLine)) {
+    const side = p.left > colLeft ? 'left' : p.right < colRight ? 'right' : null
+    if (side) {
+      const paraBottom = r.bottom - (parseFloat(cs.borderBottomWidth) || 0)
+      const height = Math.min(Math.max(...hits.map((o) => o.bottom)), paraBottom) - top
+      const width = side === 'left' ? p.left - colLeft : colRight - p.right
+      lineFloats.push({ el, side, width, height })
+      return true
+    }
+  }
   // a band pushes the paragraph whole: its space-before reopens below the band
   // (probe: 3.75pt before + 8pt line landed 11.75pt under the band bottom)
   const bandHit = rects.some(
@@ -753,4 +918,5 @@ function placeParagraph(
     base: [base[0], base[1], base[2]],
     pad: [padTop, p.left - colLeft, colRight - p.right],
   })
+  return true
 }

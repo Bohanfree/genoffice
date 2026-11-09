@@ -76,6 +76,8 @@ export const nl = {
   appStyleUpdated:
     'Stijl "{name}" bijgewerkt met de opmaak van de selectie; wordt bij het opslaan naar het document geschreven',
   appStyleCreated: 'Stijl "{name}" gemaakt en toegepast op de selectie',
+  appStyleInstancesSelected: '{count} exemplaren van “{name}” geselecteerd',
+  appStyleNoInstances: 'Geen tekst gebruikt “{name}”',
   appPgNumFormatSet: 'Paginanummerindeling ingesteld',
   appPageNumFormatTitle: 'Paginanummerindeling',
   appNumberFormat: 'Getalnotatie',
@@ -141,6 +143,7 @@ export const nl = {
   appCommentsTitle: 'Opmerkingen ({n})',
   appCommentPlaceholder: 'Typ een opmerking…',
   appCommentBtn: 'Opmerking',
+  appAttachImage: 'Afbeelding bijvoegen',
   appUnknownAuthor: '(Onbekende auteur)',
   appResolved: 'Opgelost',
   appResolvedComments: 'Opgeloste opmerkingen ({n})',

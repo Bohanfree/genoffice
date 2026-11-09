@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   PAGE_MARK,
+  SECTION_PAGES_MARK,
   TOTAL_PAGES_MARK,
   type HfImage,
   type HfParagraph,
@@ -15,8 +16,11 @@ import {
   hfImageHangsOnPara,
   hfCellSegStyle,
   hfCellTabLines,
+  hfPictureOnlyLine,
+  hfVSpanBodyStyle,
   hfLeadIndentCss,
   hfIndentOverhangPx,
+  hfInkOverhangPx,
   hfRowGeomOf,
   hfRowRightOverhangPx,
   hfRowStyle,
@@ -132,6 +136,7 @@ export function HeaderFooterArea({
   onCommit,
   pageNo,
   pageTotal,
+  sectionPages,
   style,
   boxGeom,
   linked,
@@ -157,6 +162,8 @@ export function HeaderFooterArea({
   pageNo?: number | string
   /** Total page count shown for TOTAL_PAGES_MARK (NUMPAGES field), defaults to 1 */
   pageTotal?: number
+  /** Page count of this page's section shown for SECTION_PAGES_MARK (SECTIONPAGES field), defaults to pageTotal */
+  sectionPages?: number
   /** geometry override: on differing-width sections the strip is pinned to its own section's box */
   style?: React.CSSProperties
   /** page geometry: floating textboxes render at their anchor position (absent: stacked) */
@@ -175,17 +182,18 @@ export function HeaderFooterArea({
   // The editor host is a standalone element React never populates: the nested
   // editor owns its children and the whole element unmounts on exit, so no
   // stale DOM survives section/variant switches
-  const latest = useRef({ value, onCommit, onEditingChange, pageNo, pageTotal })
-  latest.current = { value, onCommit, onEditingChange, pageNo, pageTotal }
+  const latest = useRef({ value, onCommit, onEditingChange, pageNo, pageTotal, sectionPages })
+  latest.current = { value, onCommit, onEditingChange, pageNo, pageTotal, sectionPages }
   useEffect(() => {
     if (!editing) return
     const el = editRef.current
     if (!el) return
-    const { value: v, pageNo: pn, pageTotal: pt } = latest.current
+    const { value: v, pageNo: pn, pageTotal: pt, sectionPages: sp } = latest.current
     const handle = mountHfEditor(el, {
       value: v,
       pageNo: String(pn ?? 1),
       pageTotal: String(pt ?? 1),
+      sectionPages: String(sp ?? pt ?? 1),
       spellcheck: spellcheckEnabled(),
       onCommit: (next) => latest.current.onCommit(next),
       onExit: () => {
@@ -200,6 +208,7 @@ export function HeaderFooterArea({
   const display = (text: string) => {
     const t = text
       .replaceAll(TOTAL_PAGES_MARK, String(pageTotal ?? 1))
+      .replaceAll(SECTION_PAGES_MARK, String(sectionPages ?? pageTotal ?? 1))
       .replaceAll(PAGE_MARK, String(pageNo ?? 1))
     return hfUsesLegacyHash(value) ? t.replace('#', String(pageNo ?? 1)) : t
   }
@@ -208,6 +217,7 @@ export function HeaderFooterArea({
   const firstEditable = hfEditorSlot(paras)
   const rowGeom = hfRowGeomOf(kind, boxGeom)
   const indOver = hfIndentOverhangPx(paras, rowGeom)
+  const inkOver = hfInkOverhangPx(paras)
   const tabOver = Math.max(
     hfRowRightOverhangPx(paras, rowGeom),
     ...paras.map((p) =>
@@ -223,6 +233,7 @@ export function HeaderFooterArea({
       style={{
         ...(tabOver > 0 ? { ['--hf-tab-over' as string]: `${tabOver.toFixed(1)}px` } : {}),
         ...(indOver > 0 ? { ['--hf-ind-over' as string]: `${indOver.toFixed(1)}px` } : {}),
+        ...(inkOver > 0 ? { ['--hf-ink-over' as string]: `${inkOver}px` } : {}),
         ...style,
       }}
       data-tip={
@@ -371,23 +382,12 @@ export function HfContent({
         {para.cells.map((cell, j) => {
           const geom = hfCellGeometry(cell)
           const spans = (runs: Run[]) => runSpans(runs, 'page-hf-cell-img')
-          return (
-            <div
-              key={j}
-              className="page-hf-cell"
-              style={{
-                ...geom.style,
-                // document content colors (w:shd / borders) plus their dark-page twins
-                ...(cell.fill ? { backgroundColor: `#${cell.fill}` } : {}),
-                ...dkStyleProps({
-                  ...(cell.fill ? { background: `#${cell.fill}` } : {}),
-                  backgroundImage: geom.diagonals,
-                  borders: geom.borders,
-                }),
-              }}
-            >
-              {/* one block line per cell paragraph (mirrors makeGapHfEl) */}
-              {(cell.paras.length > 0 ? cell.paras : [[]]).map((runs, k) => {
+          const vSpan = !cell.vMergeContinue && (cell.vSpan ?? 1) > 1
+          // vMerge: the continuation holds nothing; the spanning cell's
+          // paragraphs overlay the merged rows without sizing its own row
+          const cellParas = cell.vMergeContinue
+            ? null
+            : (cell.paras.length > 0 ? cell.paras : [[]]).map((runs, k) => {
                 const props = cell.paraProps?.[k]
                 const tabLines = hfCellTabLines(runs, props, geom, para.row, display)
                 if (!tabLines) {
@@ -433,7 +433,29 @@ export function HfContent({
                     </div>
                   )
                 })
-              })}
+              })
+          return (
+            <div
+              key={j}
+              className={vSpan ? 'page-hf-cell page-hf-cell-vspan' : 'page-hf-cell'}
+              style={{
+                ...geom.style,
+                // document content colors (w:shd / borders) plus their dark-page twins
+                ...(cell.fill ? { backgroundColor: `#${cell.fill}` } : {}),
+                ...dkStyleProps({
+                  ...(cell.fill ? { background: `#${cell.fill}` } : {}),
+                  backgroundImage: geom.diagonals,
+                  borders: geom.borders,
+                }),
+              }}
+            >
+              {vSpan ? (
+                <div className="page-hf-cell-vspan-body" style={hfVSpanBodyStyle(cell)}>
+                  {cellParas}
+                </div>
+              ) : (
+                cellParas
+              )}
             </div>
           )
         })}
@@ -446,7 +468,12 @@ export function HfContent({
           return (
             <div
               key={i}
-              className={['page-hf-para', para.frameXAlign && 'page-hf-frame', ...box.classes]
+              className={[
+                'page-hf-para',
+                para.frameXAlign && 'page-hf-frame',
+                hfPictureOnlyLine(para.runs) && 'page-hf-pic-line',
+                ...box.classes,
+              ]
                 .filter(Boolean)
                 .join(' ')}
               style={{ ...box.style, ...margins(i) }}

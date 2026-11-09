@@ -1250,6 +1250,136 @@
       "truths": 3,
       "proseOnly": null,
       "fixtures": ["render-hf-fixed-margin-header-dist"]
+    },
+    {
+      "line": 873,
+      "date": "2026-11-02",
+      "title": "2026-11-02 a break-only paragraph after a page-anchored floating table turns the page above the float band",
+      "abridged": false,
+      "truths": 3,
+      "proseOnly": null,
+      "fixtures": ["render-break-para-after-page-float"]
+    },
+    {
+      "line": 878,
+      "date": "2026-11-02",
+      "title": "Space before at a page top opened by the paragraph's own break: pageBreakBefore vs leading w:br, compat 14 15",
+      "abridged": false,
+      "truths": 3,
+      "proseOnly": null,
+      "fixtures": ["render-pbb-text-space-before", "render-pbb-text-space-before-c14"]
+    },
+    {
+      "line": 884,
+      "date": "2026-11-02",
+      "title": "2026-11-02 anchored picture past the column edge keeps its posOffset X; CSS float stacking is not a Word rule",
+      "abridged": false,
+      "truths": 5,
+      "proseOnly": null,
+      "fixtures": ["anchor-overhang-keeps-offset"]
+    },
+    {
+      "line": 891,
+      "date": "2026-11-02",
+      "title": "2026-11-02 docDefaults w:lang w:val naming an East Asian language lays every run's Latin out with the run's eastAsia face",
+      "abridged": false,
+      "truths": 6,
+      "proseOnly": null,
+      "fixtures": ["ea-lang-latin-via-ea-slot"]
+    },
+    {
+      "line": 899,
+      "date": "2026-11-02",
+      "title": "2026-11-02 VML rule-only paragraph = one line of the rule run's face, whatever marks wrap it",
+      "abridged": false,
+      "truths": 3,
+      "proseOnly": null,
+      "fixtures": ["render-vml-rule-only-line"]
+    },
+    {
+      "line": 904,
+      "date": "2026-11-02",
+      "title": "2026-11-02 header paragraph under an auto line multiple below 1 keeps its glyphs whole over a tiny advance",
+      "abridged": false,
+      "truths": 2,
+      "proseOnly": null,
+      "fixtures": ["render-hf-tiny-line-mult-ink"]
+    },
+    {
+      "line": 908,
+      "date": "2026-11-02",
+      "title": "2026-11-02 Korean bullet faces lift Latin list lines by their centred ascent; Word-shipped Gulim is not the charset-81 Malgun route",
+      "abridged": false,
+      "truths": 3,
+      "proseOnly": null,
+      "fixtures": ["kr-marker-face-line"]
+    },
+    {
+      "line": 913,
+      "date": "2026-11-02",
+      "title": "2026-11-02 a missing face follows its fontTable altName in the cs, ascii and eastAsia slots; Shift-JIS charset without altName is Yu Gothic; digits in an rtl run take the ascii face",
+      "abridged": false,
+      "truths": 7,
+      "proseOnly": null,
+      "fixtures": ["fonttable-altname-missing-cs"]
+    },
+    {
+      "line": 922,
+      "date": "2026-11-03",
+      "title": "2026-11-03 w:position",
+      "abridged": false,
+      "truths": 3,
+      "proseOnly": "probe docx kept locally; the rule is a CSS-only change (vertical-align -> relative offset) with no block-height model to pin",
+      "fixtures": []
+    },
+    {
+      "line": 928,
+      "date": "2026-11-03",
+      "title": "2026-11-03 header strip lines: a picture line with only whitespace text is as tall as the picture; vMerge cells overlay their rows",
+      "abridged": false,
+      "truths": 4,
+      "proseOnly": "probe docx kept locally; the rules are strip DOM/CSS changes (vertical-align, overlay box) without a block-height model to pin",
+      "fixtures": []
+    },
+    {
+      "line": 935,
+      "date": "2026-11-03",
+      "title": "2026-11-03 side-wrapped anchored picture at the page bottom: the page turn is a compatibilityMode 15 rule, legacy layout overflows the bottom margin",
+      "abridged": false,
+      "truths": 5,
+      "proseOnly": "probe docx kept locally; the rule is a slicer decision (legacy no-turn + pull-up + carry) pinned by apps/docs/tests/pagination.test.ts \"anchored drawings at the page bottom\"",
+      "fixtures": ["render-legacy-side-picture-overflow"]
+    },
+    {
+      "line": 943,
+      "date": "2026-11-03",
+      "title": "2026-11-03 Hiragino names with a fontTable altName follow it; David is Times-metric Latin with its own Hebrew advances",
+      "abridged": false,
+      "truths": 2,
+      "proseOnly": "corpus-derived (production Word PDFs + fontTools over Word DFonts, no synthetic probe); pinned by packages/font-metrics/tests/resolve.test.ts (kana name with/without altName) and apps/docs/tests/font-resolve.test.ts (alias pacing 1.1724, David GO chain, 0.9839)",
+      "fixtures": ["bidi-mark-cs-size-last-style-ref"]
+    },
+    {
+      "line": 959,
+      "date": "2026-11-03",
+      "title": "2026-11-03 Installed Latin-named Korean face",
+      "abridged": false,
+      "truths": 3,
+      "proseOnly": null,
+      "fixtures": [
+        "ea-lang-val-empty-mark",
+        "kr-installed-face-factor",
+        "theme-ea-slot-script-table"
+      ]
+    },
+    {
+      "line": 975,
+      "date": "2026-11-03",
+      "title": "Header wrapTopAndBottom band pushes the strip's own line under compatibilityMode 15; side-wrapped header drawings are body obstacles",
+      "abridged": false,
+      "truths": 4,
+      "proseOnly": null,
+      "fixtures": ["render-hf-anchor-band"]
     }
   ]
 }

@@ -80,18 +80,30 @@ export function effectiveBottomPx(set: SectionSettings, footerPx: number): numbe
 export function singleVariantGeomOf(
   set: SectionSettings,
   hf: SectionHfHeights,
-): Pick<SectionGeom, 'firstContentHeight' | 'evenContentHeight'> {
-  const capacity = (variant: HfVariant) => {
-    const { headerPx, footerPx } = hfVariantReservedPx(hf, variant)
-    return (
-      twipsToPx(set.pageHeight) - effectiveTopPx(set, headerPx) - effectiveBottomPx(set, footerPx)
-    )
-  }
+): Pick<
+  SectionGeom,
+  | 'firstContentHeight'
+  | 'evenContentHeight'
+  | 'marginBottomPx'
+  | 'firstMarginBottomPx'
+  | 'evenMarginBottomPx'
+> {
+  const bottom = (variant: HfVariant) =>
+    effectiveBottomPx(set, hfVariantReservedPx(hf, variant).footerPx)
+  const capacity = (variant: HfVariant) =>
+    twipsToPx(set.pageHeight) -
+    effectiveTopPx(set, hfVariantReservedPx(hf, variant).headerPx) -
+    bottom(variant)
   const base = capacity('default')
   const even = hfHasVariant(hf, 'even') ? capacity('even') : undefined
   return {
-    ...(hfHasVariant(hf, 'first') ? { firstContentHeight: capacity('first') } : {}),
-    ...(even !== undefined && Math.abs(even - base) > 0.01 ? { evenContentHeight: even } : {}),
+    marginBottomPx: bottom('default'),
+    ...(hfHasVariant(hf, 'first')
+      ? { firstContentHeight: capacity('first'), firstMarginBottomPx: bottom('first') }
+      : {}),
+    ...(even !== undefined && Math.abs(even - base) > 0.01
+      ? { evenContentHeight: even, evenMarginBottomPx: bottom('even') }
+      : {}),
   }
 }
 
@@ -577,25 +589,35 @@ export function sectionTopMarginSpecs(
 }
 
 /**
- * First block of every section that opens a new page (nextPage/evenPage/oddPage).
- * A w:tblpPr table floated at the bottom of the previous section's last page is
- * a CSS float whose box reaches past the section break in the DOM; a table
- * opening the next section would then be pushed below it and the pagination
- * would charge that band to the new page. Word never carries a float across a
- * page, so the block clears it (the cleared position is the page boundary).
+ * Blocks that open a new page by instruction: the first block of every section
+ * that starts one (nextPage/evenPage/oddPage) and the block after an explicit
+ * page break (a trailing w:br page or the block's own pageBreakBefore / leading
+ * w:br). A w:tblpPr table floated at the bottom of the closing page is a CSS
+ * float whose box reaches past the break in the DOM: a table opening the next
+ * section was pushed below it and the band charged to the new page; a heading
+ * after a break-only paragraph sat inside the band and the page turn, clamped
+ * below the float, left it on the closing page above the table (prod holdout
+ * 040). Word never carries a float across a page, so the opener clears it (the
+ * cleared position is the page boundary).
  */
 export function sectionPageStartSpecs(
   blocks: BlockBox[],
   sections: SectionInfo[],
 ): ColumnBlockPlacement[] {
-  const specs: ColumnBlockPlacement[] = []
+  const openers = new Set<HTMLElement>()
   for (let i = 1; i < sections.length; i++) {
     const s = sections[i]
     if (s.startType === 'continuous' || s.startType === 'nextColumn') continue
     const first = blocks.find((b) => b.docxIndex === s.firstBlockIndex && b.el)
-    if (first?.el) specs.push({ el: first.el, dx: 0, dy: 0, sectionPageStart: true })
+    if (first?.el) openers.add(first.el)
   }
-  return specs
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]
+    if (!b.el || b.floated) continue
+    const prev = i > 0 ? blocks[i - 1] : undefined
+    if (b.breakBefore || prev?.breakAfter) openers.add(b.el)
+  }
+  return [...openers].map((el) => ({ el, dx: 0, dy: 0, sectionPageStart: true }))
 }
 
 /** edge-triggered: the pass whose wrap widths or section-start clears differ
@@ -887,6 +909,13 @@ export function sectionGeoms(
       ...(vertical ? { vertical } : {}),
       topPx: effectiveTopPx(set, hfOf('default').headerPx),
       pageHeightPx: twipsToPx(set.pageHeight),
+      marginBottomPx: effectiveBottomPx(set, hfOf('default').footerPx),
+      ...(hf && hfHasVariant(hf, 'first')
+        ? { firstMarginBottomPx: effectiveBottomPx(set, hfOf('first').footerPx) }
+        : {}),
+      ...(hf && hfHasVariant(hf, 'even')
+        ? { evenMarginBottomPx: effectiveBottomPx(set, hfOf('even').footerPx) }
+        : {}),
       forceBreak,
       startType: s.startType,
       ...(numberingParity ? { numberingParity } : {}),

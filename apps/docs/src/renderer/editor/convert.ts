@@ -82,6 +82,7 @@ import { parseTextOutlineAttr } from './text-outline'
 import { charScaleXAttr, parseGlowAttr, parseTextEffectAttr } from './text-effects'
 import { SHAPE_INLINE_WRAP, shapeWrapOf } from './floating-z-order'
 import { holdsDeclaredWidth, resolveTableWidth } from './table-geometry'
+import type { PictureLayer } from './image-rotation'
 import { tableFloatSideRoom } from './anchor-geometry'
 
 export { holdsDeclaredWidth }
@@ -150,7 +151,7 @@ export function blocksToPmDoc(
   options: PmDocOptions = {},
 ): PmNode {
   const content: PmNode[] = []
-  for (const block of blocks) {
+  for (const [i, block] of blocks.entries()) {
     if (block.hidden) continue
     content.push(
       blockToPmNode(
@@ -158,6 +159,7 @@ export function blocksToPmDoc(
         sectionRowCapTwips(sections, block.docxIndex),
         sectionWidthBudget(sections, block.docxIndex),
         options,
+        block.type === 'table' ? blocks.slice(i + 1) : [],
       ),
     )
   }
@@ -899,6 +901,7 @@ function blockToPmNode(
   rowCapTwips: number | null = null,
   budget: TableWidthBudget | null = null,
   options: PmDocOptions = {},
+  followers: Block[] = [],
 ): PmNode {
   if (block.altChunk && options.legacyTableIndent)
     options = { ...options, legacyTableIndent: false }
@@ -978,6 +981,7 @@ function blockToPmNode(
           numberingChange: block.numberingChange ? JSON.stringify(block.numberingChange) : null,
           sectPrChange: block.sectPrChange ? JSON.stringify(block.sectPrChange) : null,
           blockRevision: block.blockRevision ?? null,
+          ruleOverlays: block.ruleOverlays ?? null,
           ...formatAttrs(block.format, block.runs),
         },
         content: runsToInline(block.runs ?? []),
@@ -994,6 +998,7 @@ function blockToPmNode(
         budget?.paper ?? null,
         options.legacyTableIndent ?? false,
         options.defaultRun,
+        followers,
       )
       // content-control member tables need the shell for chrome hit-testing
       if (block.sdtShell) node.attrs = { ...node.attrs, sdtShell: JSON.stringify(block.sdtShell) }
@@ -1142,6 +1147,39 @@ export function cellClipTwips(
 /** free side beside a text-anchored float below which Word's side text is only word fragments */
 const FLOAT_SIDE_MIN_TWIPS = 1440
 
+/** Word's per-line "next word fits" test beside a float (truths L858) passes
+ *  trivially when the flow up to the next table has no words — blank or
+ *  whitespace paragraphs and pictures narrower than the room — so the float
+ *  keeps wrapping them; the 1in minimum only approximates the word test.
+ *  Blank lines alone do not qualify: nothing visible sits beside the float and
+ *  the inline flow places the next table where Word does (corpus gate) */
+function floatSideWordless(followers: Block[], roomTwips: number): boolean {
+  const fits = (widthPx: number | undefined) => (widthPx ?? Infinity) * 15 <= roomTwips
+  let picture = false
+  for (const b of followers) {
+    if (b.hidden) continue
+    if (b.type === 'table') {
+      // a floating table is no flow stop: the paragraphs after it still wrap
+      if (b.table?.floatPos) continue
+      return picture
+    }
+    if (b.type === 'image') {
+      if (!fits(b.imageWidthPx)) return false
+      picture = true
+      continue
+    }
+    if (b.type === 'passthrough') return false
+    for (const r of b.runs ?? []) {
+      if (r.text.trim() !== '') return false
+      if (r.image && !r.image.rule) {
+        if (!fits(r.image.widthPx)) return false
+        picture = true
+      }
+    }
+  }
+  return picture
+}
+
 export function tableModelToPmNode(
   model: TableModel,
   docxIndex: number | null = null,
@@ -1152,15 +1190,17 @@ export function tableModelToPmNode(
   paperTwips: number | null = null,
   legacyIndent = false,
   defaults?: RunDefaults,
+  followers: Block[] = [],
 ): PmNode {
   if (rowCapTwips != null) model = capTableRowHeights(model, rowCapTwips)
-  model = resolveTableWidth(
+  const resolved = resolveTableWidth(
     model,
     availTwips != null
       ? { avail: availTwips, fit: fitTwips ?? availTwips, paper: paperTwips ?? availTwips }
       : null,
     { legacyIndent, defaults },
-  ).model
+  )
+  model = resolved.model
   const positions = model.rows.map((row) => {
     let column = 0
     return row.map((cell) => {
@@ -1169,6 +1209,33 @@ export function tableModelToPmNode(
       return at
     })
   })
+  // The restart cells' rowspans occupy their columns in the rows below; a
+  // merged-away cell a rowspan already accounts for needs no node (the
+  // rowspan stands in for it), while any other merged-away cell is a grid
+  // hole the editor's table plugin would otherwise "repair" by appending a
+  // cell — shifting every later cell of the row. Those holes become inert
+  // placeholders instead (see the cell emission below).
+  const rowSpans = model.rows.map((row, rowIndex) =>
+    row.map((_, cellIndex) => cellRowSpan(model, rowIndex, cellIndex, positions)),
+  )
+  const rowspanCovered = model.rows.map(() => new Set<number>())
+  model.rows.forEach((row, rowIndex) => {
+    row.forEach((cell, cellIndex) => {
+      const span = rowSpans[rowIndex]![cellIndex]!
+      if (span <= 1) return
+      const start = positions[rowIndex]![cellIndex]!
+      const width = cell.colSpan ?? 1
+      for (let below = rowIndex + 1; below < rowIndex + span; below++) {
+        for (let column = start; column < start + width; column++) {
+          rowspanCovered[below]?.add(column)
+        }
+      }
+    })
+  })
+  // Every merged-away cell's own model, so pmTableToModel can rebuild it
+  // instead of inheriting the restart cell's style (which lost its rawTcPr,
+  // textDirection and hidden text)
+  const continuationRecords: Array<{ row: number; column: number; cell: TableCell }> = []
   // 1 px = 15 twips (96dpi); use real values when absolute grid widths exist, fall back to percentage approximation otherwise.
   // No px floor on real grids: form grids hold dozens of sliver columns that only sit inside spanned cells
   const widthPx = model.colWidthsTwips
@@ -1211,7 +1278,8 @@ export function tableModelToPmNode(
     sideRoom != null &&
     sideRoom.leftEdge &&
     sideRoom.roomTwips < FLOAT_SIDE_MIN_TWIPS &&
-    !bandFloat
+    !bandFloat &&
+    !floatSideWordless(followers, sideRoom.roomTwips)
   const tblFloatSuppressed = tblFloatSource !== null && (minHeightTwips > 12960 || floatNoSideRoom)
   const tblFloat = tblFloatSuppressed ? null : tblFloatSource
   const table: PmNode = {
@@ -1253,6 +1321,7 @@ export function tableModelToPmNode(
       tblAutoFitEdited: false,
       tblFixedLayout: model.fixedLayout ?? false,
       tblDxaWidth: model.dxaWidth ?? false,
+      tblOverWide: resolved.overWide,
       // w:tblpPr supersedes w:tblInd: a float keeps only the legacy cell-margin hang
       indentTwips:
         tblFloat && !(legacyIndent && marginHungFloat(model)) ? null : (model.indentTwips ?? null),
@@ -1267,6 +1336,9 @@ export function tableModelToPmNode(
       tblGridChange: model.tblGridChange ?? null,
       originalStructure: null,
       originalFormatting: null,
+      // merged-away (vMerge continue) cells have no node of their own: their
+      // own tcPr bytes and hidden text ride here, keyed row:column
+      continuationCells: null,
     },
     content: model.rows.map((row, rowIndex) => ({
       type: 'docTableRow',
@@ -1283,9 +1355,32 @@ export function tableModelToPmNode(
         rawTblPrEx: model.rawTblPrExs?.[rowIndex] ?? null,
         tblPrExChange: model.rowTblPrExChanges?.[rowIndex] ?? null,
       },
-      content: row.flatMap((cell, cellIndex) => {
-        if (cell.vMerge === 'continue') return []
+      content: row.flatMap((cell, cellIndex): PmNode[] => {
         const start = positions[rowIndex][cellIndex]
+        if (cell.vMerge === 'continue') {
+          continuationRecords.push({ row: rowIndex, column: start, cell })
+          // a rowspan already stands in for this column: no node needed
+          if (rowspanCovered[rowIndex]?.has(start)) return []
+          // the grid hole needs an inert placeholder so the editor's table
+          // plugin keeps the row's columns aligned instead of appending a
+          // cell at the row's end and regenerating the table
+          return [
+            {
+              type: hasHeaderRow && rowIndex === 0 ? 'docTableHeader' : 'docTableCell',
+              attrs: {
+                colspan: cell.colSpan ?? 1,
+                rowspan: 1,
+                // the column-resize plugin fills a missing colwidth from the
+                // rendered grid, so the build must spell it the same way or the
+                // signature never matches after load
+                colwidth: widthPx ? widthPx.slice(start, start + (cell.colSpan ?? 1)) : null,
+                mergeGap: true,
+                gridGap: true,
+              },
+              content: cellContentNodes({ ...cell, paras: [''], richParas: undefined }),
+            },
+          ]
+        }
         const colspan = cell.colSpan ?? 1
         const rowspan = cellRowSpan(model, rowIndex, cellIndex, positions)
         return [
@@ -1321,6 +1416,8 @@ export function tableModelToPmNode(
       }),
     })),
   }
+  table.attrs!.continuationCells =
+    continuationRecords.length > 0 ? JSON.stringify(continuationRecords) : null
   table.attrs!.originalStructure = tableStructureSignature(table)
   table.attrs!.originalFormatting = tableFormattingSignature(table)
   return table
@@ -1507,11 +1604,50 @@ export function pmTableToModel(table: PmNode): TableModel {
     remaining: number
     span: number
     cell: Omit<TableModel['rows'][number][number], 'paras'>
+    // tracked-change records live on the restart cell (the merged-away cells
+    // have no node the editor could accept or reject)
+    trackedCellMerge: unknown
+    trackedTcPrChange: unknown
+    // the hoisted merge record is written once, on the first merged-away cell
+    first: boolean
   }
   let active = new Map<number, ActiveSpan>()
   const rows: TableModel['rows'] = []
   let maximumColumns = 0
 
+  // the merged-away cells the build carried (row:column -> their own model):
+  // rebuilding them from the restart cell's style lost their tcPr bytes,
+  // textDirection and hidden text
+  const continuationCells = new Map<string, TableCell>()
+  const serializedContinuations = table.attrs?.continuationCells
+  if (typeof serializedContinuations === 'string') {
+    try {
+      const records = JSON.parse(serializedContinuations) as Array<{
+        row?: unknown
+        column?: unknown
+        cell?: unknown
+      }>
+      for (const record of records) {
+        if (
+          typeof record?.row === 'number' &&
+          typeof record.column === 'number' &&
+          record.cell &&
+          typeof record.cell === 'object'
+        ) {
+          continuationCells.set(record.row + ':' + record.column, record.cell as TableCell)
+        }
+      }
+    } catch {
+      // a malformed record only costs the continuation styles, not the table
+    }
+  }
+  // A structural edit makes the row/column positions the records are keyed by
+  // stale: rebuild the merged-away cells the old way (restart-cell style) rather
+  // than injecting one into a row the edit moved it out of.
+  const layoutUntouched =
+    typeof table.attrs?.originalStructure !== 'string' ||
+    table.attrs.originalStructure === tableStructureSignature(table)
+  if (!layoutUntouched) continuationCells.clear()
   const rowHeightsTwips: Array<number | null> = []
   const rowHeightRules: NonNullable<TableModel['rowHeightRules']> = []
   const repeatHeaderRows: Array<boolean | null> = []
@@ -1521,7 +1657,7 @@ export function pmTableToModel(table: PmNode): TableModel {
   const rowPrChanges: Array<PropChangeInfo | null> = []
   const rawTblPrExs: Array<string | null> = []
   const rowTblPrExChanges: Array<PropChangeInfo | null> = []
-  for (const rowNode of table.content ?? []) {
+  for (const [rowIndex, rowNode] of (table.content ?? []).entries()) {
     rowHeightsTwips.push((rowNode.attrs?.heightTwips as number | null) ?? null)
     rowHeightRules.push(
       (rowNode.attrs?.heightRule as NonNullable<TableModel['rowHeightRules']>[number]) ?? null,
@@ -1546,11 +1682,33 @@ export function pmTableToModel(table: PmNode): TableModel {
     const entries: Array<{ column: number; cell: TableModel['rows'][number][number] }> = []
     const occupied = new Set<number>()
     for (const [column, span] of active) {
+      const original = continuationCells.get(rowIndex + ':' + column)
+      const merged = original && (original.colSpan ?? 1) === span.span ? original : undefined
+      // null = the editor accepted (strip the record), an object = still pending;
+      // only an absent attr leaves the build-time record in place
+      const tracked = (value: unknown, fallback: unknown): unknown =>
+        value === null ? null : value !== undefined ? value : fallback
       entries.push({
         column,
         cell: {
-          ...span.cell,
-          paras: [''],
+          ...(merged ?? span.cell),
+          paras: merged?.paras?.length ? merged.paras : [''],
+          ...(merged?.richParas?.length ? { richParas: merged.richParas } : {}),
+          // tracked-change records of a merged-away cell live on the restart
+          // cell (it is the only one with a node the editor can accept or
+          // reject): follow the restart cell's current state, never the
+          // build-time snapshot
+          ...(merged
+            ? {
+                cellMerge: (span.first
+                  ? tracked(span.trackedCellMerge, merged.cellMerge)
+                  : null) as TableCell['cellMerge'],
+                tcPrChange: tracked(
+                  span.trackedTcPrChange,
+                  merged.tcPrChange,
+                ) as TableCell['tcPrChange'],
+              }
+            : {}),
           colSpan: span.span > 1 ? span.span : undefined,
           vMerge: 'continue',
         },
@@ -1561,6 +1719,31 @@ export function pmTableToModel(table: PmNode): TableModel {
     const added = new Map<number, ActiveSpan>()
     let cursor = 0
     for (const cellNode of rowNode.content ?? []) {
+      if (cellNode.attrs?.mergeGap) {
+        // the inert stand-in for a merged-away cell: emit its column as a
+        // vMerge continuation so a formatting edit (which clears the positional
+        // records, see layoutUntouched) can never make the row lose a column
+        // and shift the cells after it. On an untouched layout the original
+        // record restores the orphan's own tcPr and hidden text; after an edit
+        // the empty cell keeps the grid width, as Word keeps the row.
+        while (occupied.has(cursor)) cursor++
+        const gap = Math.max(1, Number(cellNode.attrs?.colspan) || 1)
+        const record = continuationCells.get(rowIndex + ':' + cursor)
+        const merged = record && (record.colSpan ?? 1) === gap ? record : undefined
+        entries.push({
+          column: cursor,
+          cell: {
+            ...(merged ?? {}),
+            paras: merged?.paras?.length ? merged.paras : [''],
+            ...(merged?.richParas?.length ? { richParas: merged.richParas } : {}),
+            colSpan: gap > 1 ? gap : undefined,
+            vMerge: 'continue',
+          },
+        })
+        for (let i = 0; i < gap; i++) occupied.add(cursor + i)
+        cursor += gap
+        continue
+      }
       while (occupied.has(cursor)) cursor++
       const colspan = Math.max(1, Number(cellNode.attrs?.colspan) || 1)
       const rowspan = Math.max(1, Number(cellNode.attrs?.rowspan) || 1)
@@ -1645,9 +1828,35 @@ export function pmTableToModel(table: PmNode): TableModel {
           vMerge: rowspan > 1 ? 'restart' : undefined,
         },
       })
-      if (rowspan > 1) added.set(cursor, { remaining: rowspan - 1, span: colspan, cell: style })
+      if (rowspan > 1)
+        added.set(cursor, {
+          remaining: rowspan - 1,
+          span: colspan,
+          cell: style,
+          trackedCellMerge: cellNode.attrs?.cellMerge,
+          trackedTcPrChange: cellNode.attrs?.tcPrChange,
+          first: true,
+        })
       for (let i = 0; i < colspan; i++) occupied.add(cursor + i)
       cursor += colspan
+    }
+    // a merged-away cell a rowspan did not stand in for (an orphan
+    // continuation) has no node of its own: rebuild it from the record
+    for (const [key, cell] of continuationCells) {
+      const [recordRow, recordColumn] = key.split(':').map(Number)
+      if (recordRow !== rowIndex || recordColumn === undefined) continue
+      if (entries.some((entry) => entry.column === recordColumn)) continue
+      entries.push({
+        column: recordColumn,
+        cell: {
+          ...cell,
+          paras: cell.paras?.length ? cell.paras : [''],
+          ...(cell.richParas?.length ? { richParas: cell.richParas } : {}),
+          colSpan: (cell.colSpan ?? 1) > 1 ? cell.colSpan : undefined,
+          vMerge: 'continue',
+        },
+      })
+      for (let i = 0; i < (cell.colSpan ?? 1); i++) occupied.add(recordColumn + i)
     }
     maximumColumns = Math.max(maximumColumns, occupied.size)
     rows.push(entries.sort((a, b) => a.column - b.column).map((entry) => entry.cell))
@@ -1660,6 +1869,7 @@ export function pmTableToModel(table: PmNode): TableModel {
           ...span,
           remaining: span.remaining - 1,
           cell: { ...span.cell, cellMerge: undefined },
+          first: false,
         })
     }
     for (const [column, span] of added) next.set(column, span)
@@ -1858,10 +2068,12 @@ export function runsToInline(runs: Run[]): PmNode[] {
           rotDeg: run.image.rotDeg ?? null,
           flipH: run.image.flipH ?? false,
           flipV: run.image.flipV ?? false,
+          layers: run.image.layers ?? null,
           rule: run.image.rule
             ? {
                 ...run.image.rule,
                 ...(run.sizeHalfPoints ? { sizeHalfPoints: run.sizeHalfPoints } : {}),
+                ...((run.fontAscii ?? run.font) ? { fontAscii: run.fontAscii ?? run.font } : {}),
               }
             : null,
           rawRPr: run.rawRPr ?? null,
@@ -1898,6 +2110,12 @@ function markLeadRule(nodes: PmNode[]): void {
 }
 
 let nextZoteroFieldId = 1
+
+/** ECMA-376 17.7.3: a toggle both style layers set is off; the CSS cascade cannot see that */
+function styleXorValue(run: Run, key: 'bold' | 'italic'): boolean | null {
+  const eff = run.effective
+  return eff?.styleXor?.includes(key) ? eff[key] : null
+}
 
 function runMarks(run: Run): PmMark[] {
   const marks: PmMark[] = []
@@ -2012,7 +2230,8 @@ function runMarks(run: Run): PmMark[] {
     run.cs ||
     run.rtl !== undefined ||
     run.styleId ||
-    run.rawRPr
+    run.rawRPr ||
+    run.effective?.styleXor?.length
   ) {
     // an inline-block cannot wrap and drops inherited underlines: only
     // whitespace-free, undecorated runs get the real glyph compression
@@ -2075,9 +2294,10 @@ function runMarks(run: Run): PmMark[] {
         themeColor: run.themeColor ?? null,
         // the Cs size an rtl run inherits (strut input only; the .doc-cs style CSS paints it)
         csSize: cs && run.sizeHalfPoints === undefined ? cs.sizeHalfPoints : null,
-        // the resolved weight / style of an rtl run (table style, Cs twins, XOR), display only
-        csBold: cs && run.bold === undefined ? cs.bold : null,
-        csItalic: cs && run.italic === undefined ? cs.italic : null,
+        // the resolved weight / style of an rtl run (table style, Cs twins, XOR) or of a
+        // run whose character style toggle XORs against the paragraph style, display only
+        csBold: run.bold === undefined ? (cs?.bold ?? styleXorValue(run, 'bold')) : null,
+        csItalic: run.italic === undefined ? (cs?.italic ?? styleXorValue(run, 'italic')) : null,
         tblRun: tableStyleRunAttr(run.effective),
       },
     })
@@ -3872,6 +4092,7 @@ export function inlineToRuns(content: PmNode[]): Run[] {
             ...(node.attrs?.rotDeg ? { rotDeg: Number(node.attrs.rotDeg) } : {}),
             ...(node.attrs?.flipH ? { flipH: true } : {}),
             ...(node.attrs?.flipV ? { flipV: true } : {}),
+            ...(node.attrs?.layers ? { layers: node.attrs.layers as PictureLayer[] } : {}),
           },
         })
       }

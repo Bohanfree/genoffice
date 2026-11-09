@@ -31,6 +31,8 @@ import {
   spaceBeforeProp,
   isBundledFont,
   isCjkFontName,
+  isEaLayoutFace,
+  isKoreanLayoutFace,
   wordMetricAliasFace,
   isFontAvailable,
   krLineFactor,
@@ -39,7 +41,15 @@ import {
   textHasCjk,
   isKoreanFontName,
   wordKerns,
+  wordSlotFaces,
 } from './line-metrics'
+import {
+  documentTextContext,
+  eaFaceForAutospace,
+  eaFaceForCjkFactor,
+  eaFaceForGridStrut,
+  eaFaceForKrFactor,
+} from './text-layout/document-context'
 import { sectionGridPitchPt } from './pagination'
 import { DARK_PAPER_HEX, DK_SIDE, darkPageBorderCss, darkPageColor } from './editor/dark-page'
 import { fillInk } from './editor/shading-ink'
@@ -166,10 +176,15 @@ export function docLineFactor(parsed: ParsedDocFull, hasCjk: boolean): number {
   return hasCjk ? docCjkFactor(parsed) : lineHeightFactor(docBodyFont(parsed) ?? 'Calibri')
 }
 
+/** the document's East Asian body face (Normal, then docDefaults) */
+export function docBodyEaFont(parsed: ParsedDocFull): string | undefined {
+  return documentTextContext(parsed).bodyEa ?? undefined
+}
+
 /** StyleDisplay.font is EA-first: a name shared with fontAscii is a Latin-only
  *  declaration, unless the shared name is itself a CJK face (Meiryo in every slot). */
 function styleDeclaresEaFace(d: { font?: string; fontAscii?: string }): boolean {
-  return !!d.font && (d.font !== d.fontAscii || isCjkFontName(d.font))
+  return !!d.font && (d.font !== d.fontAscii || isEaLayoutFace(d.font))
 }
 
 /** CJK line-height factor of the document's East Asian face (feeds --doc-line-factor-cjk:
@@ -178,22 +193,7 @@ export function docCjkFactor(parsed: ParsedDocFull): number {
   // cjkDeclaredLineFactor first: missing Noto/Source Han variants take the
   // Word-probed substitution factor, same truth as per-paragraph overrides
   const factor = (f: string) => cjkDeclaredLineFactor(f) ?? lineHeightFactor(f)
-  // Normal's EA face wins over docDefaults (a Normal declaring e.g. Noto KR must
-  // not fall back to the SimSun factor)
-  const normal = defaultParaDisplay(parsed)
-  const normalEa = normal?.font && styleDeclaresEaFace(normal) ? normal.font : undefined
-  if (normalEa && !normal?.eaSlotEmpty) return factor(normalEa)
-  const dd = parsed.docDefaults
-  if (dd?.eastAsiaFont && !dd.eaSlotEmpty) return factor(dd.eastAsiaFont)
-  // An empty EA theme slot can still use a CJK-capable Latin theme face.
-  // Japanese templates commonly put Yu Mincho or Yu Gothic in the Latin
-  // slots, and LibreOffice lays undeclared CJK out with that face.
-  // A Latin theme face (Calibri…) can't render CJK, so the lang backfill wins.
-  const themeLatin = parsed.themeFonts?.minor
-  if ((normal?.eaSlotEmpty || dd?.eaSlotEmpty) && themeLatin && isCjkFontName(themeLatin)) {
-    return factor(themeLatin)
-  }
-  return factor(normalEa ?? dd?.eastAsiaFont ?? 'SimSun')
+  return factor(eaFaceForCjkFactor(documentTextContext(parsed)))
 }
 
 /**
@@ -212,23 +212,14 @@ export function docAutospaceOff(parsed: ParsedDocFull): boolean {
   // docDefaults w:lang w:val naming an East Asian language classifies the
   // Latin text itself as East Asian: no gaps anywhere (Word probe 2026-09-11,
   // ja-JP both ways; zh/ko assumed by the same mechanism)
-  if (/^(?:ja|zh|ko)(?:[-_]|$)/i.test(parsed.docDefaults?.lang ?? '')) return true
-  const normal = defaultParaDisplay(parsed)
-  const normalEa =
-    normal?.font &&
-    !normal.eaSlotEmpty &&
-    (normal.font !== normal.fontAscii || isKoreanFontName(normal.font))
-      ? normal.font
-      : undefined
-  const dd = parsed.docDefaults
+  const ctx = documentTextContext(parsed)
+  if (ctx.eastAsianLang) return true
   // docDefaults decides: a declared face gates on its own, a theme slot always
   // resolves (themeFontLang) and keeps the gaps even when the default paragraph
   // style names a missing superfamily (prod corpus 20261020 sample 023: Normal
   // "Noto Sans CJK KR" over an empty theme slot, Word pads every digit-hangul
   // seam). Only a bare docDefaults lets the Normal style gate.
-  const ddDeclared =
-    dd?.eastAsiaFont && !dd.eaSlotEmpty && !dd.eaFromLang ? dd.eastAsiaFont : undefined
-  const declared = ddDeclared ?? (dd?.eaThemeSlot ? undefined : normalEa)
+  const declared = eaFaceForAutospace(ctx)
   if (!declared || !NOTO_HAN_SUPERFAMILY_RE.test(declared.toLowerCase())) return false
   return isBundledFont(declared) || !isFontAvailable(declared)
 }
@@ -471,6 +462,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
   // --doc-grid-pitch overrides re-substitute. Any typed section activates the
   // rules: App.tsx injects the .doc-page pitch (uniform docs) or per-block
   // pitches through the layout channel (mixed docs, sectionGridPitchSpecs).
+  const textCtx = documentTextContext(parsed)
   const typedGrid = readSections(parsed).some((s) => sectionGridPitchPt(s) != null)
   // set when the typed-grid strut alias (@font-face below) could be emitted
   let gridStrut = false
@@ -561,14 +553,12 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // Latin factor for per-paragraph overrides (blockAttrs): pure-Western paragraphs
     // follow the body font's real single-line metric instead of a flat 1.2
     // Korean factor for hangul paragraphs (Batang-class 1.15 unless the EA face says otherwise)
-    const normalEaKr =
-      normal?.font && (normal.font !== normal.fontAscii || isKoreanFontName(normal.font))
-        ? normal.font
-        : undefined
+    // an empty docDefaults EA slot resolved by themeFontLang (no w:lang backfill)
+    // still decides the hangul fallback face: MS Mincho hands hangul to Malgun
     const scriptFactors = [
       `--doc-line-factor-cjk:${docCjkFactor(parsed)}`,
       `--doc-line-factor-latin:${latinLineFactor(docBodyFont(parsed) ?? 'Calibri')}`,
-      `--doc-line-factor-kr:${krLineFactor(normalEaKr ?? dd?.eastAsiaFont)}`,
+      `--doc-line-factor-kr:${krLineFactor(eaFaceForKrFactor(textCtx))}`,
     ]
     decls.push(...scriptFactors)
     // .page-wrap too: the first-page header/footer strips (.doc-page siblings)
@@ -576,16 +566,18 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     const stripVars = [`--doc-line-factor:${factor}`, ...scriptFactors]
     // dual-slot baseline: Latin families first, then the East Asian chain
     const baseAscii = normal?.fontAscii ?? dd?.asciiFont
-    const baseEa =
-      normal?.eastAsiaFont ??
-      (normal?.font !== normal?.fontAscii ? normal?.font : undefined) ??
-      dd?.eastAsiaFont
+    const baseEa = textCtx.bodyEa ?? undefined
+    const viaEa = textCtx.latinViaEaSlot
+    const base = wordSlotFaces(baseAscii, baseEa, viaEa)
+    // Latin glyphs never come from the eastAsia slot: a document without an
+    // ascii face keeps Word's default Latin head, the East Asian face is the tail
+    const baseLatin = base.ascii ?? 'Calibri'
     const baseFamily =
-      baseAscii && baseEa && baseAscii !== baseEa
-        ? cssDualFontFamily(baseAscii, baseEa)
-        : cssFontFamily(baseEa ?? baseAscii ?? 'Calibri')
+      base.eastAsia && baseLatin !== base.eastAsia
+        ? cssDualFontFamily(baseLatin, base.eastAsia)
+        : cssFontFamily(base.eastAsia ?? baseLatin)
     decls.push(`font-family:${baseFamily}`, ...fontBoxCss(baseFamily))
-    if (baseEa) decls.push(`--doc-east-asian-font:${cssFontFamily(baseEa)}`)
+    if (base.eastAsia) decls.push(`--doc-east-asian-font:${cssFontFamily(base.eastAsia)}`)
     // Mixed declared/inherited-font paragraphs under a typed grid (blockAttrs
     // .doc-grid-strut): Chromium's line box unions the strut's and every inline
     // box's half-leading geometry, so a Latin-primary strut under EA-primary
@@ -612,13 +604,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       !aliasFace &&
       isCjkFontName(baseEa) &&
       (isBundledFont(baseEa) || !isFontAvailable(baseEa))
-    const eaFace = aliasFace
-      ? baseEa
-      : normal?.font && !normal.eaSlotEmpty && normal.font !== normal.fontAscii
-        ? normal.font
-        : dd?.eastAsiaFont && (!dd.eaSlotEmpty || dd.eaFromLang)
-          ? dd.eastAsiaFont
-          : undefined
+    const eaFace = aliasFace ? baseEa : eaFaceForGridStrut(textCtx)
     if (eaFace && (typedGrid || aliasFace || standIn)) {
       const metrics = fontChainMetricsPct(cssFontFamily(eaFace))
       const blankSrc = metrics ? blankFontFaceSrc() : null
@@ -636,7 +622,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // inherited ascii chain for eastAsia-only runs (cssEaOnlyFontFamily);
     // .page-wrap too: header/footer areas are .doc-page siblings inside it
     rules.push(
-      `.page-wrap, .doc-page, .pv-page { --doc-latin-chain:${docLatinChainCss(baseAscii ?? baseEa ?? 'Calibri')} }`,
+      `.page-wrap, .doc-page, .pv-page { --doc-latin-chain:${docLatinChainCss(baseLatin)} }`,
     )
     // no size anywhere (HWP exports): Word's built-in default is 10pt, not the editor's 11pt
     const sizeHalf = normal?.sizeHalfPoints ?? dd?.sizeHalfPoints ?? 20
@@ -769,11 +755,11 @@ export function docStyleCss(parsed: ParsedDocFull): string {
     // onto every textbox line regardless of the box's own runs/snapToGrid
     rules.push(`.doc-page .doc-textbox-para { line-height:${lh ?? cssGridLineBase()} }`)
     // Normal's first-line indent applies to plain body paragraphs (not lists —
-    // their geometry runs on --li-left/--li-hang)
-    if ((normal?.indentFirstLineTwips ?? 0) > 0) {
-      rules.push(
-        `.doc-page p { text-indent:${((normal!.indentFirstLineTwips as number) / 20).toFixed(1)}pt }`,
-      )
+    // their geometry runs on --li-left/--li-hang); docDefaults' is the base
+    // under it (Google Docs exports carry the document's indent there)
+    const firstLineTwips = normal?.indentFirstLineTwips ?? dd?.indentFirstLineTwips ?? 0
+    if (firstLineTwips > 0) {
+      rules.push(`.doc-page p { text-indent:${(firstLineTwips / 20).toFixed(1)}pt }`)
     }
     // Normal's left/right indents reach unstyled paragraphs only: styled ones
     // inherit through their basedOn chain (resolved into their own rule), and a
@@ -938,13 +924,23 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       }
     }
   }
+  const viaEa = textCtx.latinViaEaSlot
+  const baseEa = textCtx.bodyEa ?? undefined
   for (const info of parsed.styles.values()) {
     const d = info.display
     if (!d) continue
     const decls: string[] = []
     const darkDecls: string[] = []
+    // a paragraph style whose w:basedOn chain never reaches the default style
+    // inherits docDefaults only: Normal's size, spacing and line (the .doc-page
+    // base) must not leak into it (a No Spacing letterhead packs its lines in Word)
+    const offNormalChain =
+      info.type === 'paragraph' && !info.isDefault && !chainReachesDefault(parsed.styles, info)
+    const dd = offNormalChain ? parsed.docDefaults : undefined
     if (d.sizeHalfPoints) {
       decls.push(`font-size:${d.sizeHalfPoints / 2}pt`, `--doc-base-fs:${d.sizeHalfPoints / 2}pt`)
+    } else if (dd?.sizeHalfPoints) {
+      decls.push(`font-size:${dd.sizeHalfPoints / 2}pt`, `--doc-base-fs:${dd.sizeHalfPoints / 2}pt`)
     } else if (info.headingLevel) {
       // a defined heading style without w:sz is body-sized, not the built-in 16pt
       decls.push('font-size:inherit')
@@ -964,21 +960,33 @@ export function docStyleCss(parsed: ParsedDocFull): string {
         `text-decoration:${[d.underline && 'underline', d.strike && 'line-through'].filter(Boolean).join(' ')}`,
       )
     }
+    // a Latin-only style (font === fontAscii) keeps the inherited East Asian
+    // slot; a style without fonts inherits its paragraph's faces as before
+    const styleSlot = wordSlotFaces(
+      d.fontAscii,
+      d.eastAsiaFont ?? (d.font !== d.fontAscii ? d.font : baseEa),
+      viaEa && !!(d.font || d.fontAscii),
+    )
+    const styleLatin = styleSlot.ascii
     if (d.font) {
       // no ascii slot at all = a genuine eastAsia-only style: its Latin glyphs
       // keep the inherited ascii chain (Word resolves them there, probe 2026-08-23)
-      const styleFamily =
-        d.fontAscii && d.fontAscii !== d.font
+      const styleFamily = viaEa
+        ? cssFontFamily(styleSlot.eastAsia ?? d.font)
+        : d.fontAscii && d.fontAscii !== d.font
           ? cssDualFontFamily(d.fontAscii, d.font)
           : d.fontAscii
             ? cssFontFamily(d.font)
             : cssEaOnlyFontFamily(d.font)
       decls.push(`font-family:${styleFamily}`, ...fontBoxCss(styleFamily))
       if (!d.eaSlotEmpty && (d.eastAsiaFont || d.font !== d.fontAscii))
-        decls.push(`--doc-east-asian-font:${cssFontFamily(d.eastAsiaFont ?? d.font)}`)
+        decls.push(
+          `--doc-east-asian-font:${cssFontFamily(styleSlot.eastAsia ?? d.eastAsiaFont ?? d.font)}`,
+        )
       // the strut alias tail must follow the style's own chain, not the doc base
       if (gridStrut) decls.push(`--doc-grid-strut-tail:${styleFamily}`)
-      if (d.fontAscii) decls.push(`--doc-latin-chain:${docLatinChainCss(d.fontAscii)}`)
+      if (d.fontAscii)
+        decls.push(`--doc-latin-chain:${docLatinChainCss(styleLatin ?? d.fontAscii)}`)
       // style-declared EA face re-anchors the CJK line factor for its paragraphs
       // (runs without their own fonts resolve --doc-line-factor-cjk through this);
       // an empty-theme-slot backfill is not a document choice and stays silent
@@ -986,21 +994,23 @@ export function docStyleCss(parsed: ParsedDocFull): string {
         decls.push(
           `--doc-line-factor-cjk:${cjkDeclaredLineFactor(d.font) ?? lineHeightFactor(d.font)}`,
         )
-        if (isKoreanFontName(d.font)) decls.push(`--doc-line-factor-kr:${krLineFactor(d.font)}`)
+        if (isKoreanLayoutFace(d.font)) decls.push(`--doc-line-factor-kr:${krLineFactor(d.font)}`)
       } else if (d.eaSlotEmpty && isCjkFontName(d.font) && !isKoreanFontName(d.font)) {
         // hangul the themeFontLang face cannot draw takes Word's fallback face height
         decls.push(`--doc-line-factor-kr:${krLineFactor(d.font)}`)
       }
-    } else if (d.fontAscii) {
+    } else if (styleLatin) {
       decls.push(
-        `font-family:${cssFontFamily(d.fontAscii)}`,
-        ...fontBoxCss(cssFontFamily(d.fontAscii)),
+        `font-family:${cssFontFamily(styleLatin)}`,
+        ...fontBoxCss(cssFontFamily(styleLatin)),
       )
-      if (gridStrut) decls.push(`--doc-grid-strut-tail:${cssFontFamily(d.fontAscii)}`)
-      decls.push(`--doc-latin-chain:${docLatinChainCss(d.fontAscii)}`)
+      if (gridStrut) decls.push(`--doc-grid-strut-tail:${cssFontFamily(styleLatin)}`)
+      decls.push(`--doc-latin-chain:${docLatinChainCss(styleLatin)}`)
     }
     // Latin lines of a paragraph style follow the style's own face, not the
     // body font (Cambria headings under a Calibri body: 1.172 vs 1.22)
+    // (empty paragraphs and marks: the ascii face, also under an East Asian
+    // docDefaults language — Word probe 2026-11-02)
     if (d.fontAscii && info.type === 'paragraph') {
       decls.push(`--doc-line-factor-latin:${latinLineFactor(d.fontAscii)}`)
     }
@@ -1025,12 +1035,6 @@ export function docStyleCss(parsed: ParsedDocFull): string {
         darkDecls.push(AUTO_INK.light.dark)
       }
     }
-    // a paragraph style whose w:basedOn chain never reaches the default style
-    // inherits docDefaults only: Normal's spacing and line (the .doc-page base)
-    // must not leak into it (a No Spacing letterhead packs its lines in Word)
-    const offNormalChain =
-      info.type === 'paragraph' && !info.isDefault && !chainReachesDefault(parsed.styles, info)
-    const dd = offNormalChain ? parsed.docDefaults : undefined
     const ownLh = cssLineHeight(d.lineRule, d.lineRawTwips, d.lineSpacing)
     const ddLh = offNormalChain
       ? cssLineHeight(dd?.lineRule, dd?.lineRawTwips, dd?.lineSpacing)
@@ -1170,7 +1174,7 @@ export function docStyleCss(parsed: ParsedDocFull): string {
       rules.push(`.doc-page :is(${LIST_LINES})${s} { --style-li-left:${pt}pt }`)
       // the toc level ladder (styles.css em padding) only stands in for a style without its own indent
       if (tocLevelOf(info.styleId, parsed.styles) !== null)
-        rules.push(`.doc-page ${s} .doc-toc-line > span:first-child { padding-left:0 }`)
+        rules.push(`.doc-page ${s} .doc-toc-line > .doc-toc-body { --doc-toc-indent:0px }`)
     }
     // w:contextualSpacing: consecutive same-style paragraphs swallow the spacing
     // between them (ListParagraph/ListBullet carry this — Word lists are tight)

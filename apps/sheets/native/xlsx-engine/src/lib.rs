@@ -30,6 +30,7 @@ mod visuals;
 
 mod cell_images;
 mod escher;
+mod external_links;
 mod refs;
 mod sparklines;
 mod table_styles;
@@ -39,6 +40,7 @@ mod types;
 mod workbook;
 mod worksheet;
 mod xls_biff;
+mod xls_styles;
 mod xlsx_package;
 mod xml_util;
 

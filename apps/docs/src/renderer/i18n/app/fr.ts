@@ -75,6 +75,8 @@ export const fr = {
   appStyleUpdated:
     "Style « {name} » mis à jour à partir de la sélection ; écrit dans le document à l'enregistrement",
   appStyleCreated: 'Style « {name} » créé et appliqué à la sélection',
+  appStyleInstancesSelected: '{count} occurrence(s) de « {name} » sélectionnée(s)',
+  appStyleNoInstances: 'Aucun texte n’utilise « {name} »',
   appPgNumFormatSet: 'Format des numéros de page défini',
   appPageNumFormatTitle: 'Format des numéros de page',
   appNumberFormat: 'Format de la numérotation',
@@ -140,6 +142,7 @@ export const fr = {
   appCommentsTitle: 'Commentaires ({n})',
   appCommentPlaceholder: 'Saisissez un commentaire…',
   appCommentBtn: 'Commentaire',
+  appAttachImage: 'Joindre une image',
   appUnknownAuthor: '(Auteur inconnu)',
   appResolved: 'Résolu',
   appResolvedComments: 'Commentaires résolus ({n})',

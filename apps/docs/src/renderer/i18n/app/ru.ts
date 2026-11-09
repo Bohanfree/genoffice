@@ -74,6 +74,8 @@ export const ru = {
   appStyleUpdated:
     'Стиль «{name}» обновлен по формату выделения; будет записан в документ при сохранении',
   appStyleCreated: 'Стиль «{name}» создан и применен к выделению',
+  appStyleInstancesSelected: 'Выделено вхождений «{name}»: {count}',
+  appStyleNoInstances: 'Стиль «{name}» нигде не используется',
   appPgNumFormatSet: 'Формат номеров страниц задан',
   appPageNumFormatTitle: 'Формат номера страницы',
   appNumberFormat: 'Формат номера',
@@ -138,6 +140,7 @@ export const ru = {
   appCommentsTitle: 'Примечания ({n})',
   appCommentPlaceholder: 'Введите примечание…',
   appCommentBtn: 'Примечание',
+  appAttachImage: 'Прикрепить картинку',
   appUnknownAuthor: '(Неизвестный автор)',
   appResolved: 'Решено',
   appResolvedComments: 'Решенные примечания ({n})',

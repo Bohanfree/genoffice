@@ -77,6 +77,7 @@ import {
   PAGE_MARK,
   placeholderText,
   type HeaderFooter,
+  type HfPictureEdit,
   type HfImage,
   type NoteInfo,
   type TextboxDisplay,
@@ -86,6 +87,7 @@ import {
   type SourceInfo,
   pendingHeadingLevel,
   pictureWatermarkPreviewImage,
+  textWatermarkPreviewImage,
   previewFontSettings,
   type StyleInfo,
   type StyleUpsert,
@@ -93,7 +95,9 @@ import {
   type ThemeColors,
   type ThemeFonts,
   type PictureWatermarkSpec,
+  type Watermark,
   type WatermarkSpec,
+  type CommentImage,
 } from '@genoffice/docx-engine'
 import type {
   AiDocContent,
@@ -127,11 +131,14 @@ import type { HfAction, HfEditingInfo } from './components/ribbon-hf-tab'
 import {
   hfCommitTarget,
   hfLinked,
+  hfTextCommit,
   ownHf,
   resolveHf,
   withHfLink,
+  withHfPictureEdit,
   type HfSectionState,
 } from './hf-sections'
+import { installHfFloatEdit, tagHfFloatEl } from './editor/hf-float-edit'
 import { hfFooterLine, hfLayoutResolved, hfPhantomSpec, hfWithPhantom } from './hf-phantom'
 import { hfVariantHeightsPx, sectionHfHeights } from './hf-heights'
 import { makeGapNotesEl, measureNoteHeightDom, noteRowMetrics } from './editor/note-dom'
@@ -176,12 +183,17 @@ import {
   liveSections,
   nextLineAnchor,
   measureBlocks,
+  alignJoinedParagraphs,
   docGridPitchPt,
   type LineAnchor,
   hfPartWidthPx,
   buildPageCuts,
   headingPagesOf,
   pageCutSignature,
+  applyGapLedger,
+  pagePaperEdges,
+  pageReaderShadow,
+  type FlowCarry,
   LEAD_ROW_TOL_PX,
   outerTableRows,
   type PageCut,
@@ -226,6 +238,7 @@ import {
   effectiveBottomPx,
   singleVariantGeomOf,
   formatPageNumber,
+  sectionPageCounts,
   visiblePageCount,
   type SectionGeom,
   type SectionHfHeights,
@@ -245,6 +258,7 @@ import {
   floatShiftsOf,
   setOversizeClips,
   setPageGaps,
+  stampGapFlowTops,
   canvasZoomOf,
   rowFillsSig,
   setRowFills,
@@ -260,8 +274,11 @@ import {
   pinParagraphRelVPictures,
   pageBorderStyleOf,
   type PageGapSpec,
+  type GapMetrics,
   LayoutBatch,
   pageFramesFromGaps,
+  gapLedgerOf,
+  PAGE_TURN_SEL,
   type PageFrame,
 } from './editor/pagination-gaps'
 import { syncWrapObstacles } from './editor/wrap-obstacles'
@@ -271,6 +288,7 @@ import { layoutMultipage, multipageColumns, multipageZoomForColumns } from './mu
 import { setColumnLayout } from './editor/column-layout'
 import { pageMargins } from './page-margins'
 import { syncLineNumbers } from './editor/line-numbers'
+import { formattingMarksPluginKey, sectionBreakMap } from './editor/formatting-marks'
 import {
   COMMENT_AREA_W,
   clearMarginAnnotations,
@@ -283,6 +301,7 @@ import {
   hfHasVisibleContent,
   hfWithoutPageMarks,
   hfStripGeom,
+  hfBodyObstacles,
   makeGapHfEl,
   hfImageHangsOnPara,
   makeHfFloatImgEl,
@@ -350,7 +369,6 @@ import {
   insertImageViaDialog,
   insertPageBreakAt,
   setParaAttrs,
-  type InkPenSettings,
   type RevisionDisplayMode,
   type ViewMode,
 } from './components/ribbon-tabs'
@@ -407,12 +425,14 @@ import { setSelectionAlign } from './editor/direction'
 import {
   editorExtensions,
   findFloatImageAt,
+  runPictureAtEvent,
   resolvedCommentsPluginKey,
   revisionDisplayState,
 } from './editor/extensions'
 import { resolveDarkPage, writeDarkPagePref } from './dark-page-pref'
 import { useDocThemeIsDark, useUiThemeIsDark } from './ui-theme'
 import { type InkAnnotation, type InkTool } from './editor/ink'
+import { loadInkPresets, saveInkPresets, type InkPreset } from './editor/ink-presets'
 import { InkOverlay } from './components/InkOverlay'
 import {
   TRACK_IGNORE,
@@ -870,6 +890,10 @@ export function App() {
   // last page's number for the document-end footer: text for the page marker, num for
   // even/odd parity (section restarts / pageNumberFmt make both differ from the physical count)
   const [lastPageNo, setLastPageNo] = useState<{ text: string; num: number } | null>(null)
+  /** SECTIONPAGES of the first and last pages (the canvas's own header and footer strips) */
+  const [edgeSectionPages, setEdgeSectionPages] = useState<{ first: number; last: number } | null>(
+    null,
+  )
   /** Page-number-format dialog + pending final-section pgNumType write (non-final sections rewrite sectPr via pgNumDirtySections) */
   const [pgNumModal, setPgNumModal] = useState<{ fmt: string; start: string } | null>(null)
   const [pgNumEdit, setPgNumEdit] = useState<{ fmt?: string; start?: number } | null>(null)
@@ -957,6 +981,9 @@ export function App() {
   const [findFocusGoTo, setFindFocusGoTo] = useState(0)
   // last pagination pass, read by the Go To tab (page / section / line targets)
   const pageLayoutRef = useRef<PageLayout | null>(null)
+  /** live section list of the last pass (header obstacles of the next pass) */
+  const lastSecListRef = useRef<SectionInfo[] | null>(null)
+  const cutsNow = useCallback(() => pageLayoutRef.current?.cuts, [])
   /** runs the debounced pagination pass now (set by the scheduler effect) */
   const flushPaginationRef = useRef<() => void>(() => {})
   /** the current pass's layout, after any pending pass: readers that need
@@ -1013,24 +1040,49 @@ export function App() {
   // the pending picture watermark as the header image it will parse back as,
   // sized against the last section's margin box like the save path
   const pendingWatermarkImage = useMemo(() => {
-    if (!watermarkDirty || !watermarkPicture) return null
-    const s = sections[sections.length - 1]?.settings ?? section
-    const box = s
-      ? {
-          widthPt: (s.pageWidth - s.marginLeft - s.marginRight) / 20,
-          heightPt: (s.pageHeight - s.marginTop - s.marginBottom) / 20,
-        }
-      : null
-    return pictureWatermarkPreviewImage(watermarkPicture, box)
-  }, [watermarkDirty, watermarkPicture, sections, section])
+    if (!watermarkDirty) return null
+    if (watermarkPicture) {
+      const s = sections[sections.length - 1]?.settings ?? section
+      const box = s
+        ? {
+            widthPt: (s.pageWidth - s.marginLeft - s.marginRight) / 20,
+            heightPt: (s.pageHeight - s.marginTop - s.marginBottom) / 20,
+          }
+        : null
+      return pictureWatermarkPreviewImage(watermarkPicture, box)
+    }
+    if (watermark) return textWatermarkPreviewImage({ text: watermark, ...(watermarkStyle ?? {}) })
+    return null
+  }, [watermarkDirty, watermarkPicture, watermark, watermarkStyle, sections, section])
+  /** Design tab / AI set_watermark: pending stores the save path drains */
+  const applyWatermark = useCallback((spec: Watermark | null) => {
+    const wm = typeof spec === 'string' ? { text: spec } : spec
+    if (wm && 'image' in wm) {
+      setWatermark(null)
+      setWatermarkStyle(null)
+      setWatermarkPicture(wm)
+    } else if (wm) {
+      const { text, ...style } = wm
+      setWatermark(text)
+      setWatermarkStyle(Object.keys(style).length > 0 ? style : null)
+      setWatermarkPicture(null)
+    } else {
+      setWatermark(null)
+      setWatermarkStyle(null)
+      setWatermarkPicture(null)
+    }
+    setWatermarkDirty(true)
+  }, [])
   const [inkAnnotations, setInkAnnotations] = useState<InkAnnotation[]>([])
   const [inksDirty, setInksDirty] = useState(false)
   const [inkTool, setInkTool] = useState<InkTool>('select')
-  const [inkPen, setInkPen] = useState<InkPenSettings>({ color: 'C00000', width: 2 })
-  const [inkHighlighter, setInkHighlighter] = useState<InkPenSettings>({
-    color: 'FFFF00',
-    width: 10,
-  })
+  const [inkPresets, setInkPresetsState] = useState<InkPreset[]>(loadInkPresets)
+  const [inkActiveId, setInkActiveId] = useState(() => inkPresets[0].id)
+  const setInkPresets = useCallback((next: InkPreset[]) => {
+    setInkPresetsState(next)
+    saveInkPresets(next)
+  }, [])
+  const inkActive = inkPresets.find((p) => p.id === inkActiveId) ?? inkPresets[0]
   const [footnotes, setFootnotes] = useState<NoteInfo[]>([])
   /** Footnote ids already shown in canvas page gaps (the end-of-document list skips them to avoid duplication) */
   const [gapNoteIds, setGapNoteIds] = useState<Set<string>>(new Set())
@@ -1578,7 +1630,23 @@ export function App() {
     if (!target) return false
     // functional: two commits in one turn (Remove Page Numbers on both strips, an
     // editor exit racing an AI set) must both land
-    setSectionHfEdits((m) => ({ ...m, [target.key]: next }))
+    setSectionHfEdits((m) => ({ ...m, [target.key]: hfTextCommit(m[target.key], next) }))
+    return true
+  }
+  /** a floating header picture moved or resized on section `si`'s strip
+   *  (hf-float-edit); false when the strip has no part to take it */
+  const commitHfPictureAt = (
+    si: number,
+    kind: 'header' | 'footer',
+    variant: HfView,
+    drawing: number,
+    edit: HfPictureEdit,
+  ): boolean => {
+    if (!hfCommitTarget(hfState, si, kind, variant)) return false
+    setSectionHfEdits(
+      (m) =>
+        withHfPictureEdit({ ...hfState, edits: m }, si, kind, variant, drawing, edit)?.edits ?? m,
+    )
     return true
   }
   /** pending changes outside the body, refreshed with the revision badge (see storyRevisions memo) */
@@ -3193,7 +3261,7 @@ export function App() {
   }, [editor])
 
   const submitNewComment = useCallback(
-    (text: string) => submitNewCommentImpl(reviewCtxRef.current, text),
+    (text: string, image?: CommentImage) => submitNewCommentImpl(reviewCtxRef.current, text, image),
     [],
   )
   const replyToComment = useCallback(
@@ -3599,6 +3667,8 @@ export function App() {
     [doc, pageColor],
   )
 
+  // compatibilityMode < 15: header wrapTopAndBottom bands clamp to the page top (hfStripGeom)
+  const legacyBands = (doc?.parsed.compatibilityMode ?? 0) < 15
   // single-section header/footer push-down: body top = max(marginTop, headerDist + header height)
   const singleHfPx = useMemo((): SectionHfHeights => {
     if (!section) return { headerPx: 0, footerPx: 0 }
@@ -3608,13 +3678,13 @@ export function App() {
     return hfVariantHeightsPx(
       (kind, variant) => hfLayoutResolved(kind, hfResolveAt(0, kind, variant), hfPhantom),
       () => contentW,
-      hfStripGeom(section),
+      hfStripGeom(section, legacyBands),
       titlePg,
       evenOddHf,
     )
     // hfMeasureEpoch: re-measure once the doc-scoped styles have committed
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, hfResolveAt, hfPhantom, titlePg, evenOddHf, hfMeasureEpoch])
+  }, [section, hfResolveAt, hfPhantom, titlePg, evenOddHf, legacyBands, hfMeasureEpoch])
   const effTopSingle = section ? effectiveTopPx(section, singleHfPx.headerPx) : 0
   const effBottomSingle = section ? effectiveBottomPx(section, singleHfPx.footerPx) : 0
   const canvasSection = sections[0]?.settings ?? section
@@ -3653,12 +3723,12 @@ export function App() {
         secs,
         (i, kind, variant) =>
           hfLayoutResolved(kind, resolveHf(liveState, i, kind, variant), hfPhantom),
-        { titlePg, evenOddHf },
+        { titlePg, evenOddHf, legacyBands },
       )
     },
     // hfMeasureEpoch: re-measure once the doc-scoped styles have committed
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [hfState, hfPhantom, titlePg, evenOddHf, hfMeasureEpoch],
+    [hfState, hfPhantom, titlePg, evenOddHf, legacyBands, hfMeasureEpoch],
   )
 
   // paragraphs without w:pStyle take the default paragraph style's constraints (widowControl off in Normal)
@@ -3714,9 +3784,11 @@ export function App() {
         : imageParaPaginationMeta(b.originalXml, styleOf, doc?.parsed.docDefaults)
       const fnBands = footnoteBandsOf(b)
       const fnExtra = fnBands.reduce((s, band) => s + band.heightPx, 0)
-      if (!flags && fnExtra === 0) return undefined
+      const modern = (doc?.parsed.compatibilityMode ?? 0) >= 15
+      if (!flags && fnExtra === 0 && !modern) return undefined
       return {
         ...flags,
+        ...(modern ? { modernAnchorFloats: true } : {}),
         ...(fnExtra > 0 ? { footnoteExtraPx: fnExtra, footnoteBands: fnBands } : {}),
       }
     },
@@ -3918,6 +3990,7 @@ export function App() {
     if (!doc || !section) {
       setPageInfo({ current: 1, total: 1 })
       setLastPageNo(null)
+      setEdgeSectionPages(null)
       pageLayoutRef.current = null
       return
     }
@@ -3985,23 +4058,40 @@ export function App() {
       // only the former maps the midpoint onto the page shown there. Its
       // repeated-header clones are float content (the carry covers only the
       // gap bands; the continuation's page starts at the gap's bottom)
-      let gapAbove = 0
-      // mixed-column pages pull their gap (and everything below) up over the
-      // vacated stacked space: add that back to land in the gapless coordinates
-      let pullUpAbove = 0
-      for (const gap of pm.querySelectorAll<HTMLElement>(
-        '.page-gap:not(.page-gap-carry), .page-repeat-header',
-      )) {
-        if (gap.classList.contains('page-repeat-header') && insideFloatTable(gap)) continue
-        const r = gap.getBoundingClientRect()
-        if (r.top < midScreen) {
-          gapAbove += Math.min(r.height, midScreen - r.top)
-          pullUpAbove += Math.max(0, -parseFloat(gap.style.marginTop) || 0)
+      const fromDom = () => {
+        let gapAbove = 0
+        // mixed-column pages pull their gap (and everything below) up over the
+        // vacated stacked space: add that back to land in the gapless coordinates
+        let pullUpAbove = 0
+        for (const gap of pm.querySelectorAll<HTMLElement>(
+          `${PAGE_TURN_SEL}, .page-repeat-header`,
+        )) {
+          if (gap.classList.contains('page-repeat-header') && insideFloatTable(gap)) continue
+          const r = gap.getBoundingClientRect()
+          if (r.top < midScreen) {
+            gapAbove += Math.min(r.height, midScreen - r.top)
+            pullUpAbove += Math.max(0, -parseFloat(gap.style.marginTop) || 0)
+          }
         }
+        return pageAt(slices, (midScreen - origin - gapAbove) / factor + pullUpAbove)
       }
-      const midY = (midScreen - origin - gapAbove) / factor + pullUpAbove
+      // the page whose gap box starts at or above the midpoint (inside a gap band
+      // the page below it is current, where the DOM sum lands too)
+      const fromCuts = () => {
+        let page = 1
+        for (const e of pagePaperEdges(pageCuts, mTopPx)) {
+          if (pmRect.top + e.gapTop * factor > midScreen) break
+          page = e.page + 1
+        }
+        return page
+      }
+      // without gap widgets (web / read mode) the pages follow the flow Y alone
+      const shadowPage = pageReaderShadow.enabled ? fromDom() : null
+      const page = pageCuts.some((c) => c.gap) ? fromCuts() : fromDom()
+      if (shadowPage !== null && shadowPage !== page)
+        pageReaderShadow.report('locate', shadowPage, page)
       // visible-page numbering so the status bar and F9 NUMPAGES agree with the gap widgets
-      const current = visiblePageCount(slices, pageAt(slices, midY))
+      const current = visiblePageCount(slices, page)
       const total = visiblePageCount(slices)
       setPageInfo((prev) =>
         prev.current === current && prev.total === total ? prev : { current, total },
@@ -4154,6 +4244,11 @@ export function App() {
         const el = editor.view.nodeDOM(pos) as HTMLElement | null
         const prev = el ? lastBlocks.find((b) => b.el === el) : undefined
         if (!el || !prev) return reject('block')
+        if (
+          el.classList.contains('doc-para-join-head') ||
+          el.classList.contains('doc-para-join-tail')
+        )
+          return reject('join')
         items.push({ el, prev })
       }
       return blocksKeepSlicing(items, slices, factor) || reject('geometry')
@@ -4228,7 +4323,55 @@ export function App() {
       // pass settles the chain (FollowUpChain refuses a repeating cause)
       const planOf = blockPlans()
       const obstacleShadow = newObstacleShadow()
-      const obstaclesChanged = syncWrapObstacles(pm, factor, editor.view, planOf, obstacleShadow)
+      pageReaderShadow.enabled =
+        import.meta.env.DEV ||
+        (window as unknown as { __pageReaderShadow?: boolean }).__pageReaderShadow === true
+      // the previous pass's block leads: where its gap widgets stand in the DOM
+      const prevLayout = pageLayoutRef.current
+      const pageLeads = prevLayout
+        ? new Map<Element, number>(
+            prevLayout.cuts.flatMap((c, i) => {
+              const el =
+                c.gap?.kind === 'block' && c.lead.kind === 'block'
+                  ? prevLayout.blocks[c.lead.block]?.el
+                  : undefined
+              return el ? [[el, i] as const] : []
+            }),
+          )
+        : undefined
+      // header drawings reaching into the body of each page of the previous
+      // pass (its cuts name the variant and section a page shows)
+      const headerObstacleCache = new Map<number, ReturnType<typeof hfBodyObstacles>>()
+      const headerObstaclesOf = (pageIdx: number) => {
+        const hit = headerObstacleCache.get(pageIdx)
+        if (hit) return hit
+        const cut = prevLayout?.cuts[pageIdx]
+        const prevSecs = lastSecListRef.current
+        const si = prevSecs ? Math.min(cut?.section ?? 0, prevSecs.length - 1) : 0
+        const set = prevSecs ? prevSecs[si]?.settings : section
+        let out: ReturnType<typeof hfBodyObstacles> = []
+        if (cut && set) {
+          const end = prevSecs?.[si]?.lastBlockIndex
+          const hsi = end === undefined ? -1 : hfSections.findIndex((s) => s.lastBlockIndex === end)
+          const images = hfResolveAt(hsi >= 0 ? hsi : si, 'header', cut.hf.variant).images
+          out = hfBodyObstacles(
+            images,
+            hfStripGeom(set, legacyBands),
+            effectiveTopPx(set, cut.hf.headerPx),
+          )
+        }
+        headerObstacleCache.set(pageIdx, out)
+        return out
+      }
+      const obstaclesChanged = syncWrapObstacles(
+        pm,
+        factor,
+        editor.view,
+        planOf,
+        obstacleShadow,
+        pageLeads,
+        headerObstaclesOf,
+      )
       // natural-flow measuring state: in-paragraph gap widgets force a line break
       // at the PREVIOUS pass's cut, so measuring with them in layout re-confirms
       // that cut even after decoration-only reflows (justify space-shrink) moved
@@ -4238,6 +4381,8 @@ export function App() {
       // setPageGaps so widget building and later display-state reads (strip
       // alignment, cut overlays, locate) run against the real layout.
       pm.classList.add('measuring-natural')
+      // joined paragraphs align against the natural flow (gap widgets hidden)
+      alignJoinedParagraphs(pm, factor, editor.view)
       // a columned canvas measures + slices in the single-flow measuring state (fillLineBoxes
       // also reads the DOM for line sampling, so it must share the state); display-state DOM
       // reads like gap positioning happen outside the measuring state
@@ -4270,6 +4415,7 @@ export function App() {
         // liveSections: when a section-break block is deleted, that section merges into the next in real time (effective before saving)
         const secList =
           sections.length > 0 ? liveSections(sections, blocks, sectBreaks, delSectBreaks) : null
+        lastSecListRef.current = secList
         if (secList) assignSections(blocks, secList)
         // the endnote area takes part in page slicing (placed together at the document end; overflows continue on later pages)
         const withEndnotes = appendEndnotesBlock(
@@ -4281,15 +4427,20 @@ export function App() {
         // floating boxes below the flow end still need pages to land on; boxes
         // reaching only into the last page's bottom margin stay there (Word
         // draws anchored objects over the margin instead of opening a page)
+        const hfHs = secList ? hfHeightsOf(secList) : null
+        const geoms: SectionGeom[] = secList
+          ? colGeomsFor(sectionGeoms(secList, hfHs!, evenOddHf))
+          : [{ contentHeight: contentH, forceBreak: false, ...singleVariantGeom }]
         const lastSec = secList?.[secList.length - 1]?.settings ?? section
+        const spillOverhangPx =
+          geoms[geoms.length - 1]?.marginBottomPx ?? (lastSec ? twipsToPx(lastSec.marginBottom) : 0)
         const flowWithFloats = appendFloatSpillBlock(
           blocks,
           withEndnotes?.totalHeight ?? totalHeight,
           floats,
-          lastSec ? twipsToPx(lastSec.marginBottom) : 0,
+          spillOverhangPx,
         )
         const flowH = flowWithFloats ?? withEndnotes?.totalHeight ?? totalHeight
-        const hfHs = secList ? hfHeightsOf(secList) : null
         const secSig = secList
           ? secList
               .map((s) => `${s.firstBlockIndex}:${s.lastBlockIndex}:${s.startType ?? ''}`)
@@ -4304,14 +4455,13 @@ export function App() {
           rowFills: [],
           rowSplits: [],
           floatVShifts: [],
+          floatPullUps: [],
+          floatCarries: [],
           floatFlows: [],
           floatSplits: [],
           oversizeClips: [],
         }
-        const geoms: SectionGeom[] = secList
-          ? colGeomsFor(sectionGeoms(secList, hfHs!, evenOddHf))
-          : [{ contentHeight: contentH, forceBreak: false, ...singleVariantGeom }]
-        const s = sliceWithLineSplit(
+        let s = sliceWithLineSplit(
           blocks,
           geoms,
           flowH,
@@ -4320,6 +4470,27 @@ export function App() {
           sliceOut,
           resume ?? undefined,
         )
+        const floatTops = floats.map((f) => f.top)
+        const pullFloats = () => {
+          floats.forEach((f, i) => (f.top = floatTops[i]))
+          for (const p of sliceOut.floatPullUps ?? [])
+            for (const f of floats)
+              if (!f.pinned && !f.pageRelV && Math.abs(f.anchorTop - p.blockTop) < 0.5)
+                f.top += p.dyPx
+        }
+        pullFloats()
+        // the spill block was sized from unpulled boxes: a box pulled up to the
+        // paper edge may no longer need the page it opened
+        if (flowWithFloats !== null && sliceOut.floatPullUps?.length) {
+          const spillAt = blocks.findIndex((b) => b.isFloatSpill)
+          if (spillAt >= 0) blocks.splice(spillAt, 1)
+          const base = withEndnotes?.totalHeight ?? totalHeight
+          const again = appendFloatSpillBlock(blocks, base, floats, spillOverhangPx)
+          if ((again ?? base) < flowH - 0.5) {
+            s = sliceWithLineSplit(blocks, geoms, again ?? base, factor, blockMetaOf, sliceOut)
+            pullFloats()
+          }
+        }
         tSlice = performance.now() - t1
         const cuts = buildPageCuts(blocks, s, geoms, hfHs ?? [singleHfPx], {
           evenOddHf,
@@ -4349,6 +4520,8 @@ export function App() {
           rowSplits: sliceOut.rowSplits ?? [],
           rowFills: sliceOut.rowFills ?? [],
           floatVShifts: sliceOut.floatVShifts ?? [],
+          floatPullUps: sliceOut.floatPullUps ?? [],
+          floatCarries: sliceOut.floatCarries ?? [],
           floatFlows: sliceOut.floatFlows ?? [],
           floatSplits: sliceOut.floatSplits ?? [],
           oversizeClips: sliceOut.oversizeClips ?? [],
@@ -4361,6 +4534,8 @@ export function App() {
         floats,
         rowFills,
         floatVShifts,
+        floatPullUps,
+        floatCarries,
         floatFlows,
         floatSplits,
         oversizeClips,
@@ -4378,6 +4553,7 @@ export function App() {
         geoms: measured.geoms,
         hfHeights: hfHs ?? [singleHfPx],
         rowSplits: measured.rowSplits,
+        carries: [],
       }
       if (mirrorMargins) locateCaretPageRef.current()
       const blockIndex = new BlockIndex(blocks)
@@ -4394,6 +4570,12 @@ export function App() {
               )
             : String(num),
         })
+        const counts = sectionPageCounts(slices)
+        const first = counts[0]
+        const last = counts[lastIdx]
+        setEdgeSectionPages((prev) =>
+          prev?.first === first && prev.last === last ? prev : { first, last },
+        )
       }
       // Auto-refresh TOC page numbers from the fresh slicing, like Word's field
       // update. Gated on dirtyRef — our pagination approximates Word's, so a
@@ -4435,6 +4617,8 @@ export function App() {
         // skips the same distance to start beside the last portion)
         const carryGaps = new Map<number, number>()
         const overlayCutAnchors: LineAnchor[] = []
+        const overlayPages: number[] = []
+        const carries: FlowCarry[] = []
         const lineRectsOf = createLineRectsCache()
         const gapIds = new Set<string>()
         let firstPageFloats: { els: HTMLElement[]; key: string } | undefined
@@ -4541,10 +4725,11 @@ export function App() {
             imgs
               .map(
                 (f) =>
-                  `${f.dataUrl.length}:${hashStr(f.dataUrl.slice(0, 1024) + f.dataUrl.slice(-1024))}:${f.posXPx ?? f.posH ?? ''}:${f.posYPx ?? f.posV ?? ''}:${f.posHRel ?? ''}${f.posVRel ?? ''}:${f.widthPx ?? ''}x${f.heightPx ?? ''}${f.washout ? ':w' : ''}${f.rotationDeg ? `:r${f.rotationDeg}` : ''}${f.wordArt ? `:t${f.wordArt.text}` : ''}`,
+                  `${f.dataUrl.length}:${hashStr(f.dataUrl.slice(0, 1024) + f.dataUrl.slice(-1024))}:${f.posXPx ?? f.posH ?? ''}:${f.posYPx ?? f.posV ?? ''}:${f.posHRel ?? ''}${f.posVRel ?? ''}:${f.widthPx ?? ''}x${f.heightPx ?? ''}${f.washout ? ':w' : ''}${f.rotationDeg ? `:r${f.rotationDeg}` : ''}${f.wordArt ? `:t${JSON.stringify(f.wordArt)}` : ''}`,
               )
               .join('|')
           const visiblePages = visiblePageCount(slices)
+          const sectionPages = sectionPageCounts(slices)
           const canvasPaperW = pmRect.width / factor
           const canvasSet = secList?.[0]?.settings ?? section
           const canvasContentWPx = canvasSet
@@ -4659,8 +4844,9 @@ export function App() {
                 images: gapFooter.images,
                 pageNo: pageNoTextOf(k),
                 pageTotal: visiblePages,
+                sectionPages: sectionPages[k],
                 geom: {
-                  ...hfStripGeom(prevSec),
+                  ...hfStripGeom(prevSec, legacyBands),
                   stripLeft: gapStripLeft(prevSec, box, k),
                   ...stripColumnW(gapFooter, 'footer'),
                 },
@@ -4672,6 +4858,7 @@ export function App() {
                 hfPageIdx: String(k),
                 hfPage: pageNoTextOf(k),
                 hfTotal: String(visiblePages),
+                hfSectionPages: String(sectionPages[k]),
               })
               el.style.top = 'auto'
               el.style.bottom = `${GAP_BAND + metrics.marginTop + box.footerDist}px`
@@ -4689,8 +4876,9 @@ export function App() {
                 images: gapHeader.images,
                 pageNo: pageNoTextOf(k + 1),
                 pageTotal: visiblePages,
+                sectionPages: sectionPages[k + 1],
                 geom: {
-                  ...hfStripGeom(nextSec),
+                  ...hfStripGeom(nextSec, legacyBands),
                   stripLeft: gapStripLeft(nextSec, box, k + 1),
                   ...stripColumnW(gapHeader, 'header'),
                 },
@@ -4702,6 +4890,7 @@ export function App() {
                 hfPageIdx: String(k + 1),
                 hfPage: pageNoTextOf(k + 1),
                 hfTotal: String(visiblePages),
+                hfSectionPages: String(sectionPages[k + 1]),
               })
               el.style.bottom = 'auto'
               // the strip sits at w:headerDist even under a fixed top margin above it: Word lets
@@ -4715,7 +4904,9 @@ export function App() {
             // positioned from that page's origin (the gap's bottom edge is marginTop
             // above it), like PaginationPreview's per-page watermark layer
             for (const img of gapHeader.floats) {
-              hfEls.push(makeHfFloatImgEl(img, floatBoxOf(k + 1), 'gap'))
+              hfEls.push(
+                tagHfFloatEl(makeHfFloatImgEl(img, floatBoxOf(k + 1), 'gap'), gapHeader, k + 1),
+              )
             }
             const hfProps =
               hfEls.length > 0
@@ -4727,14 +4918,19 @@ export function App() {
                     // Page / Odd & Even toggle can swap the variant behind identical
                     // text), or stale PAGE/NUMPAGES / strip insets / edit targets
                     // survive reuse
-                    hfKey: `${pageNoTextOf(k)}·${pageNoTextOf(k + 1)}·${visiblePages}·${gapFooter.section}${gapFooter.variant[0]}·${gapHeader.section}${gapHeader.variant[0]}·${hfSig(gapFooter.value)}·${hfSig(gapHeader.value)}·f${floatSig(gapHeader.floats)}·g${mixedWidths ? 1 : 0}:${stripGeomSig(prevSec, k)}:${stripGeomSig(nextSec, k + 1)}`,
+                    hfKey: `${pageNoTextOf(k)}·${pageNoTextOf(k + 1)}·${visiblePages}·${sectionPages[k]}/${sectionPages[k + 1]}·${gapFooter.section}${gapFooter.variant[0]}·${gapHeader.section}${gapHeader.variant[0]}·${hfSig(gapFooter.value)}·${hfSig(gapHeader.value)}·f${floatSig(gapHeader.floats)}·g${mixedWidths ? 1 : 0}:${stripGeomSig(prevSec, k)}:${stripGeomSig(nextSec, k + 1)}`,
                   }
                 : {}
             // previous page's footnotes: rendered into the top of the gap (page-bottom area), with the gap enlarged by the reserved height.
             // in-table gaps carry no footnote area (absolute positioning inside a table-row is unreliable); footnotes stay in the end-of-document list
             let notes: HTMLElement | undefined
             let notesKey: string | undefined
-            let notesMetrics = metrics
+            // the page's text area (footnotes excluded): dropped pictures fit above its bottom
+            const prevContentH =
+              twipsToPx(prevSec.pageHeight) -
+              effectiveTopPx(prevSec, prevHf.headerPx) -
+              metrics.marginBottom
+            let notesMetrics: GapMetrics = { ...metrics, bodyHeight: prevContentH - fnH }
             if (items.length > 0) {
               const contentW = twipsToPx(
                 prevSec.pageWidth - prevSec.marginLeft - prevSec.marginRight,
@@ -4749,7 +4945,11 @@ export function App() {
                 (id) => editNote('footnote', id),
               )
               notesKey = `${Math.round(fnH)}:${notesLeft.toFixed(1)}:${items.map((n) => `${n.no}${n.text}`).join('|')}`
-              notesMetrics = { ...metrics, marginBottom: metrics.marginBottom + fnH }
+              notesMetrics = {
+                ...notesMetrics,
+                marginBottom: metrics.marginBottom + fnH,
+                bodyMarginBottom: metrics.marginBottom,
+              }
             }
             const markShown = () => items.forEach((n) => gapIds.add(n.id))
             // the page lead comes from the PageCut (I11); the DOM only resolves the
@@ -4770,13 +4970,20 @@ export function App() {
               if (notes && pad > 0) notes.style.top = `${5 + pad}px`
               gaps.push({
                 el,
+                page: k + 1,
                 boundaryY: slice.start,
                 metrics:
                   pad > 0
-                    ? { ...notesMetrics, marginBottom: notesMetrics.marginBottom + pad }
+                    ? {
+                        ...notesMetrics,
+                        marginBottom: notesMetrics.marginBottom + pad,
+                        bodyPad: pad,
+                        bodyMarginBottom: metrics.marginBottom,
+                      }
                     : notesMetrics,
                 ...(pullUp > 0.5 ? { pullUp } : {}),
                 ...(cut.leadDropsSpaceBefore ? { suppressLeadMt: true } : {}),
+                ...(cut.leadMtPx !== undefined ? { leadMtPx: cut.leadMtPx } : {}),
                 ...(notes ? { notes, notesKey } : {}),
                 ...hfProps,
               })
@@ -4791,10 +4998,16 @@ export function App() {
                 gaps.push({
                   pos: editor.state.doc.content.size,
                   kind: 'inline',
+                  page: k + 1,
                   boundaryY: slice.start,
                   metrics:
                     pad > 0
-                      ? { ...notesMetrics, marginBottom: notesMetrics.marginBottom + pad }
+                      ? {
+                          ...notesMetrics,
+                          marginBottom: notesMetrics.marginBottom + pad,
+                          bodyPad: pad,
+                          bodyMarginBottom: metrics.marginBottom,
+                        }
                       : notesMetrics,
                   ...(pullUp > 0.5 ? { pullUp } : {}),
                   ...hfProps,
@@ -4845,6 +5058,7 @@ export function App() {
                   // below the gap fills exactly that space. Clones are decorations —
                   // page-gap-inline keeps them out of the virtual coordinates.
                   let repeatHeaderEls: HTMLElement[] | undefined
+                  let repeatHeaderPx = 0
                   if (slice.repeatHeader) {
                     const tableEl = tr.closest('table')
                     const srcRows = tableEl
@@ -4864,7 +5078,10 @@ export function App() {
                       els.push(clone)
                       acc += row.getBoundingClientRect().height / factor
                     }
-                    if (els.length > 0) repeatHeaderEls = els
+                    if (els.length > 0) {
+                      repeatHeaderEls = els
+                      repeatHeaderPx = acc
+                    }
                   }
                   // the spanning gap cell must cover exactly the table's column
                   // grid: a wider colSpan adds phantom columns, which collapses
@@ -4891,10 +5108,17 @@ export function App() {
                         pos: $pos.before(d),
                         kind: 'table',
                         cols: gridCols,
+                        page: k + 1,
                         boundaryY: slice.start,
+                        ...(fsplit ? { floatGap: true } : {}),
+                        ...(repeatHeaderPx > 0 ? { repeatHeaderPx } : {}),
                         metrics:
                           tablePad > 0
-                            ? { ...metrics, marginBottom: metrics.marginBottom + tablePad }
+                            ? {
+                                ...metrics,
+                                marginBottom: metrics.marginBottom + tablePad,
+                                bodyMarginBottom: metrics.marginBottom,
+                              }
                             : metrics,
                         ...hfProps,
                         ...(repeatHeaderEls
@@ -4931,6 +5155,7 @@ export function App() {
               // position (posAtDOM collapses them all to the node start): overlay markers
               if (anchorElement(anchor)?.closest('.doc-nested-table')) {
                 overlayCutAnchors.push(anchor)
+                overlayPages.push(k + 1)
                 return
               }
               const pos = posFromAnchor(editor.view, anchor)
@@ -4938,7 +5163,7 @@ export function App() {
                 missCut(`cell lead has no ProseMirror position`)
                 return
               }
-              const cutCell = singleCutCell(cutRow, anchor)
+              const cutCell = singleCutCell(cutRow, anchor, factor)
               if (cutCell) {
                 // single-column row: insert a real inline gap band; bleed to the paper
                 // edges from the anchor's block (the widget's containing block)
@@ -4948,6 +5173,7 @@ export function App() {
                 gaps.push({
                   pos,
                   kind: 'cell',
+                  page: k + 1,
                   boundaryY: slice.start,
                   metrics: {
                     ...metrics,
@@ -4960,7 +5186,7 @@ export function App() {
                 })
               } else {
                 // multi-cell row: keep the zero-height dashed marker (no hfProps — it can't host header/footer strips)
-                gaps.push({ pos, kind: 'cut', metrics })
+                gaps.push({ pos, kind: 'cut', page: k + 1, metrics })
               }
               return
             }
@@ -4980,6 +5206,7 @@ export function App() {
             const elRect = b.el.getBoundingClientRect()
             gaps.push({
               pos,
+              page: k + 1,
               boundaryY: slice.start,
               metrics: {
                 ...notesMetrics,
@@ -4995,11 +5222,14 @@ export function App() {
           // first page has no gap widget; its floating header images ride a
           // dedicated zero-height widget at the document start
           if (slices.length > 0) {
-            const floats = pageHfOf(0, 'header').floats
+            const firstHeader = pageHfOf(0, 'header')
+            const floats = firstHeader.floats
             if (floats.length > 0) {
               const box = floatBoxOf(0)
               firstPageFloats = {
-                els: floats.map((img) => makeHfFloatImgEl(img, box, 'lead')),
+                els: floats.map((img) =>
+                  tagHfFloatEl(makeHfFloatImgEl(img, box, 'lead'), firstHeader, 0),
+                ),
                 key: `${floatSig(floats)}·${Math.round(box.pageW)}x${Math.round(box.pageH)}·${Math.round(box.marginLeft)}·${Math.round(box.hostLeft ?? 0)}·${Math.round(box.marginTop)}·${Math.round(box.sectMarginTop)}·${Math.round(box.paperX ?? 0)}`,
               }
             }
@@ -5084,6 +5314,7 @@ export function App() {
           dyPx: number
           flow?: boolean
           carryPx?: number
+          pull?: boolean
         }> = []
         // blocks by rounded top: a scan per shift was floats × blocks on picture-heavy
         // documents; the first match in document order wins, as the scan did
@@ -5111,6 +5342,20 @@ export function App() {
           const b = pageRelBlockAt(f.blockTop)
           if (b?.el) floatVEls.push({ el: b.el, dyPx: f.dyPx })
         }
+        const pictureAt = blockAtTop((bb) => !!bb.floatPicture)
+        for (const f of floatPullUps) {
+          const b = pictureAt(f.blockTop)
+          if (b?.el) floatVEls.push({ el: b.el, dyPx: f.dyPx, pull: true })
+        }
+        for (const f of floatCarries) {
+          const b = blocks.find(
+            (bb) =>
+              !!bb.el &&
+              !bb.floated &&
+              Math.abs(bb.top - (bb.carryAppliedPx ?? 0) - f.blockTop) < 0.5,
+          )
+          if (b?.el && f.carryPx > 0.5) floatVEls.push({ el: b.el, dyPx: 0, carryPx: f.carryPx })
+        }
         const floatTableAt = blockAtTop((bb) => Boolean(bb.floatTable))
         for (const f of floatFlows) {
           const b = floatTableAt(f.blockTop)
@@ -5126,13 +5371,21 @@ export function App() {
           const carry = f.blockTop + f.carryPx - (anchor.top - (anchor.carryAppliedPx ?? 0))
           if (carry > 0.5) floatVEls.push({ el: anchor.el, dyPx: 0, carryPx: carry })
           const gapPx = carryGaps.get(f.blockTop) ?? 0
-          if (gapPx > 0.5)
+          if (gapPx > 0.5) {
             gaps.push({
               el: anchor.el,
               carryPx: gapPx,
               metrics: { marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0 },
             })
+            carries.push({ y: anchor.top, px: Math.round(gapPx) })
+          }
         }
+        // the cuts learn the gap widgets' geometry: every page reader below
+        // (float shifts, cell boxes, frames, status bar, thumbnails) reads them
+        applyGapLedger(cuts, gapLedgerOf(gaps, overlayPages))
+        if (pageLayoutRef.current) pageLayoutRef.current.carries = carries
+        // no gap widgets (web / read mode, one page): the flow is the page
+        const ledgered = cuts.some((c) => c.gap)
         setFloatVShifts(editor.view, floatVEls, layoutBatch)
         stage('floatV')
         pm.classList.remove('measuring-natural')
@@ -5227,20 +5480,23 @@ export function App() {
         }
         stage('hfStrips')
         // after setPageGaps: widget insertion is synchronous, so anchor rects are final
+        if (ledgered)
+          stampGapFlowTops(pm, cuts, pm.getBoundingClientRect().top + mTopPx * factor, factor)
         syncFloatShifts(
           pm,
           floats,
           pm.getBoundingClientRect().top + mTopPx * factor,
           factor,
           mTopPx - twipsToPx((sections[0]?.settings ?? section)?.marginTop ?? 0),
+          ledgered ? { cuts, carries } : undefined,
         )
         stage('floatShifts')
         // Word keeps anchored objects on the page: cell boxes lifted past the
         // paper top by a negative anchor offset are pushed back down
         clampCellBoxTops(pm, pm.getBoundingClientRect().top, factor)
         clampCellImageTops(pm, factor)
-        pinCellBoxesToPage(pm, factor)
-        pinPageRelXPictures(pm, factor)
+        pinCellBoxesToPage(pm, factor, cuts)
+        pinPageRelXPictures(pm, factor, cuts)
         pinParagraphRelVPictures(
           pm,
           planOf,
@@ -5258,15 +5514,16 @@ export function App() {
           const firstFrame = pbSec
             ? { left: pageLeftOf(pbSec), width: twipsToPx(pbSec.pageWidth) }
             : undefined
-          syncPageBorders(wrapEl, borderStyle, factor, firstFrame)
+          syncPageBorders(wrapEl, borderStyle, factor, firstFrame, cuts)
           stage('pageBorders')
-          syncLineNumbers(wrapEl, pm, blocks, secList ?? [], factor, blockMetaOf, firstFrame)
+          syncLineNumbers(wrapEl, pm, blocks, secList ?? [], factor, blockMetaOf, firstFrame, cuts)
           stage('lineNumbers')
           // differing-width documents paint one sheet per page (the shared paper is transparent)
           syncPageSheets(
             wrapEl,
             factor,
             mixedPaper && viewMode === 'print' && !readMode ? (firstFrame ?? null) : null,
+            cuts,
           )
         }
         syncMarginAnnotations(
@@ -5277,6 +5534,7 @@ export function App() {
           doc.parsed.blocks,
           editor.view,
           marginHandlersRef.current,
+          cuts,
         )
         stage('sheets+annotations')
         tSetGaps = performance.now() - tSet0
@@ -5315,15 +5573,24 @@ export function App() {
         if (wrapWidthsChanged) document.dispatchEvent(new Event(WRAP_WIDTHS_COMMITTED_EVENT))
         // the last page paints as a full sheet like the ones above it:
         // extend the canvas to that page's paper bottom, measured from the last gap
-        const gapEls = pm.querySelectorAll('.page-gap:not(.page-gap-carry)')
-        const lastGapEl = gapEls[gapEls.length - 1]
-        if (lastGapEl && slices.length > 1) {
+        const bands = pagePaperEdges(cuts, mTopPx).filter((e) => e.gap.kind !== 'cut')
+        const lastBand = bands[bands.length - 1]
+        if (lastBand && slices.length > 1) {
           const last = slices[slices.length - 1]
           const lastSec = secList?.[last.section]?.settings ?? section
           const lastHf = hfHs?.[last.section] ?? singleHfPx
-          const paperTop =
-            (lastGapEl.getBoundingClientRect().bottom - pm.getBoundingClientRect().top) / factor -
-            effectiveTopPx(lastSec, lastHf.headerPx)
+          const paperTop = lastBand.gapBottom - effectiveTopPx(lastSec, lastHf.headerPx)
+          if (pageReaderShadow.enabled) {
+            const gapEls = pm.querySelectorAll(PAGE_TURN_SEL)
+            const lastGapEl = gapEls[gapEls.length - 1]
+            const domTop = lastGapEl
+              ? (lastGapEl.getBoundingClientRect().bottom - pm.getBoundingClientRect().top) /
+                  factor -
+                effectiveTopPx(lastSec, lastHf.headerPx)
+              : NaN
+            if (!(Math.abs(domTop - paperTop) <= 1))
+              pageReaderShadow.report('lastPaper', domTop.toFixed(1), paperTop.toFixed(1))
+          }
           const paperH = Math.round(paperTop + twipsToPx(lastSec.pageHeight))
           pm.style.minHeight = `${paperH}px`
           // a mixed-column last page keeps its columns stacked in the flow with no
@@ -5355,7 +5622,15 @@ export function App() {
           gapBoundaryMismatch,
           pageCutMismatch,
           pageCutDiag,
+          get pageReaderMismatch() {
+            return pageReaderShadow.count
+          },
+          get pageReaderDiag() {
+            return pageReaderShadow.diag
+          },
+          pageReaderShadowed: pageReaderShadow.enabled,
           pageCuts,
+          floatSplits,
           pageCutSig: pageCutSignature(pageCuts),
           planDiff,
           planDiffHistogram: planDiffHistogram(planDiff),
@@ -5594,12 +5869,15 @@ export function App() {
     hfState,
     hfSections,
     hfResolveAt,
+    legacyBands,
     comments,
     commentsUi.cards,
     commentsUi.panel,
     // display-mode toggles reflow the text (No Markup hides deletions) and gate
     // the change bars, but dispatch no doc change: remeasure must follow them
+    // (revisions-in-balloons lifts deletions out of the flow the same way)
     revisionDisplay,
+    balloonMode,
     delSectBreaks,
     pendingWatermarkImage,
   ])
@@ -6482,7 +6760,16 @@ export function App() {
         const img = (e.target as HTMLElement).closest('img') ?? protectedEl?.querySelector('img')
         imageSrc = img?.getAttribute('src') || null
         let selectedNode = false
-        if (protectedEl) {
+        // a floating run picture is its own node, outside any .doc-protected block
+        const runPic =
+          !protectedEl && !fromKeyboard ? runPictureAtEvent(editor.view, e.target, x, y) : null
+        if (runPic) {
+          editor.view.dispatch(
+            editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, runPic.pos)),
+          )
+          imageSrc = runPic.img.getAttribute('src') || imageSrc
+          selectedNode = true
+        } else if (protectedEl) {
           const dom = editor.view.nodeDOM.bind(editor.view)
           let nodePos = -1
           editor.state.doc.descendants((node, pos) => {
@@ -6543,6 +6830,7 @@ export function App() {
       value,
       pageNo: page,
       pageTotal: el.dataset.hfTotal ?? '1',
+      sectionPages: el.dataset.hfSectionPages,
       spellcheck: spellcheckActive,
       onCommit: (next) => {
         committed = true
@@ -6607,6 +6895,26 @@ export function App() {
   }
   const openHfEditorRef = useRef(openHfEditor)
   openHfEditorRef.current = openHfEditor
+  // floating header pictures: moved and resized in header editing, reached from
+  // the body by a double-click (Word)
+  const hfFloatEditRef = useRef({ open: openHfEditor, commit: commitHfPictureAt, editable: false })
+  hfFloatEditRef.current = {
+    open: openHfEditor,
+    commit: commitHfPictureAt,
+    editable: !readMode && !isProtected,
+  }
+  useEffect(() => {
+    const root = scrollContainerRef.current
+    if (!root) return
+    return installHfFloatEdit({
+      root,
+      editing: () => hfEditingRef.current != null,
+      editable: () => hfFloatEditRef.current.editable,
+      open: (pageIdx) => hfFloatEditRef.current.open('header', pageIdx),
+      commit: (t, edit) =>
+        hfFloatEditRef.current.commit(t.section, 'header', t.variant, t.drawing, edit),
+    })
+  }, [])
   const toggleEvenOddHf = (on: boolean) => {
     hfEditorRef.current?.exit()
     setEvenOddHf(on)
@@ -7018,23 +7326,8 @@ export function App() {
       watermark: {
         current: () => fileCtxRef.current.watermark,
         set: (spec) => {
-          const ctx = fileCtxRef.current
-          if (!ctx.doc) return 'no document is open'
-          if (spec && 'image' in spec) {
-            ctx.setWatermark(null)
-            ctx.setWatermarkStyle(null)
-            ctx.setWatermarkPicture(spec)
-          } else if (spec) {
-            const { text, ...style } = spec
-            ctx.setWatermark(text)
-            ctx.setWatermarkStyle(Object.keys(style).length > 0 ? style : null)
-            ctx.setWatermarkPicture(null)
-          } else {
-            ctx.setWatermark(null)
-            ctx.setWatermarkStyle(null)
-            ctx.setWatermarkPicture(null)
-          }
-          ctx.setWatermarkDirty(true)
+          if (!fileCtxRef.current.doc) return 'no document is open'
+          applyWatermark(spec)
           return null
         },
       },
@@ -7044,7 +7337,7 @@ export function App() {
         apply: (targets, mode, all) => applyStoryRevisionsRef.current(targets, mode, all),
       },
     }),
-    [upsertStyleDef, isProtected, trackChangesForced],
+    [upsertStyleDef, applyWatermark, isProtected, trackChangesForced],
   )
 
   const aiHfAccess = useMemo<AiHeaderFooterAccess>(
@@ -7261,6 +7554,17 @@ export function App() {
         setStatus(t('appSectionSettingsApplied', { n: activeSection + 1 }))
       }
     },
+    onPageBorderAll: (props: SectionSettings['pageBorderProps'] | null) => {
+      const bordered = ({ pageBorderProps: _drop, ...s }: SectionSettings): SectionSettings =>
+        props ? { ...s, pageBorder: true, pageBorderProps: props } : { ...s, pageBorder: false }
+      setSections((prev) => prev.map((s) => ({ ...s, settings: bordered(s.settings) })))
+      if (section) {
+        setSection(bordered(section))
+        setSectionDirty(true)
+      }
+      const earlier = sections.slice(0, -1).map((_, i) => i)
+      if (earlier.length > 0) setSectionsDirty((d) => [...new Set([...d, ...earlier])])
+    },
     onPaperSizeAll: (
       portraitW: number,
       portraitH: number,
@@ -7289,12 +7593,14 @@ export function App() {
       setPageColor(next)
       setPageColorDirty(true)
     },
-    onWatermark: (next: string | null) => {
-      setWatermark(next)
-      setWatermarkDirty(true)
-      setWatermarkStyle(null)
-      setWatermarkPicture(null)
-      setStatus(next ? t('appWatermarkSet', { text: next }) : t('appWatermarkRemoved'))
+    onWatermark: (next: Watermark | null) => {
+      applyWatermark(next)
+      const text = typeof next === 'string' ? next : next && 'text' in next ? next.text : null
+      setStatus(
+        next
+          ? t('appWatermarkSet', { text: text ?? t('ribbonWatermarkPicture') })
+          : t('appWatermarkRemoved'),
+      )
     },
     onThemeFonts: (fonts: ThemeFonts) => {
       setThemeFonts(fonts)
@@ -7307,8 +7613,8 @@ export function App() {
       setStatus(t('appThemeColorsApplied', { name: colors.name ?? '' }))
     },
     onInkTool: setInkTool,
-    onInkPen: setInkPen,
-    onInkHighlighter: setInkHighlighter,
+    onInkPresets: setInkPresets,
+    onInkActivate: setInkActiveId,
     onInkClearAll: clearInks,
     onInsertNote: insertNote,
     onAddSource: (source: SourceInfo) => {
@@ -7576,7 +7882,7 @@ export function App() {
     }
     const wrap = editor?.view.dom.closest<HTMLElement>('.page-wrap')
     if (!wrap) return
-    const frames = pageFramesFromGaps(wrap, zoom / 100)
+    const frames = pageFramesFromGaps(wrap, zoom / 100, undefined, pageLayoutRef.current?.cuts)
     // the canvas ends where the content ends; the grid shows the last sheet whole
     const last = frames[frames.length - 1]
     if (last && last.bottom - last.top < canvasPageH) last.bottom = last.top + canvasPageH
@@ -7779,6 +8085,15 @@ export function App() {
     scrollPosRef.current = { left: container.scrollLeft, top: container.scrollTop }
   }, [zoom, multipage, mpCols, mpActiveSlotTop, editor])
 
+  useEffect(() => {
+    if (!editor) return
+    editor.view.dispatch(
+      editor.state.tr
+        .setMeta(formattingMarksPluginKey, { on: showMarks, breaks: sectionBreakMap(sections) })
+        .setMeta('addToHistory', false),
+    )
+  }, [editor, showMarks, sections, lang])
+
   if (!editor) return null
 
   // canvas geometry is anchored to the first section (stable across cursor moves);
@@ -7958,11 +8273,18 @@ export function App() {
         mirrorMargins={mirrorMargins}
         pageColor={pageColor}
         watermark={watermark}
+        watermarkStyle={watermarkStyle}
+        watermarkPicture={watermarkPicture}
+        watermarkDocImage={
+          watermarkDirty
+            ? null
+            : (doc?.parsed.headerImages?.find((img) => img.wordArt || img.watermark) ?? null)
+        }
         themeFonts={themeFonts}
         themeColors={themeColors}
         inkTool={inkTool}
-        inkPen={inkPen}
-        inkHighlighter={inkHighlighter}
+        inkPresets={inkPresets}
+        inkActiveId={inkActiveId}
         inkCount={inkAnnotations.length}
         sources={sources}
         zoteroNoteFields={
@@ -8086,6 +8408,7 @@ export function App() {
                 zoom={zoom / 100}
                 pageInfo={pageInfo}
                 onClose={closeNav}
+                cuts={cutsNow}
               />
             )}
             {doc && (
@@ -8190,11 +8513,6 @@ export function App() {
                             : undefined
                         }
                       >
-                        {watermark && watermarkDirty && (
-                          <div className="page-watermark" aria-hidden="true">
-                            {watermark}
-                          </div>
-                        )}
                         {/* Boolean(): a trailing 0 (empty non-floating image list) must not render as a literal "0" text node */}
                         {Boolean(
                           multiHf ||
@@ -8213,6 +8531,7 @@ export function App() {
                             }}
                             pageNo={firstPageNoText}
                             pageTotal={pageInfo.total}
+                            sectionPages={edgeSectionPages?.first}
                             sectionLabel={hfSectionLabel('header', 0)}
                             editRequest={
                               hfAreaEditRequest?.kind === 'header' ? hfAreaEditRequest.nonce : null
@@ -8236,7 +8555,7 @@ export function App() {
                             boxGeom={
                               canvasSection && canvasBox
                                 ? {
-                                    ...hfStripGeom(canvasSection),
+                                    ...hfStripGeom(canvasSection, legacyBands),
                                     stripLeft: edgeHeaderStyle
                                       ? twipsToPx(firstPageMargins!.left)
                                       : (paperW - canvasBox.contentWidth) / 2,
@@ -8284,6 +8603,7 @@ export function App() {
                             }}
                             pageNo={lastPageNoText}
                             pageTotal={pageInfo.total}
+                            sectionPages={edgeSectionPages?.last}
                             linked={hfLinkedAt(lastSectionIdx, 'footer', footerAreaView)}
                             sectionLabel={hfSectionLabel('footer', lastSectionIdx)}
                             editRequest={
@@ -8309,7 +8629,7 @@ export function App() {
                             boxGeom={
                               lastSection && lastBox
                                 ? {
-                                    ...hfStripGeom(lastSection),
+                                    ...hfStripGeom(lastSection, legacyBands),
                                     stripLeft: edgeFooterStyle
                                       ? twipsToPx(lastPageMargins!.left)
                                       : (paperW - lastBox.contentWidth) / 2,
@@ -8321,8 +8641,8 @@ export function App() {
                         {(inkAnnotations.length > 0 || inkTool !== 'select') && !readMode && (
                           <InkOverlay
                             tool={isProtected ? 'select' : inkTool}
-                            color={inkTool === 'highlighter' ? inkHighlighter.color : inkPen.color}
-                            width={inkTool === 'highlighter' ? inkHighlighter.width : inkPen.width}
+                            color={inkActive.color}
+                            width={inkActive.width}
                             zoom={zoom}
                             annotations={inkAnnotations}
                             onAdd={addInk}
@@ -8809,6 +9129,7 @@ export function App() {
           mirrorMargins={mirrorMargins}
           delSectBreaks={delSectBreaks}
           hfParts={doc.parsed.hfParts ?? {}}
+          legacyBands={legacyBands}
           colFlow={viewMode === 'print' ? colFlow : null}
           colMode={viewMode === 'print' ? colMode : 'none'}
           hf={{
@@ -8842,9 +9163,8 @@ export function App() {
               footerEven: doc.parsed.footerEven?.images,
             },
           }}
-          watermark={watermark}
           watermarkDirty={watermarkDirty}
-          watermarkPicture={pendingWatermarkImage}
+          pendingWatermark={pendingWatermarkImage}
           blockMetaOf={blockMetaOf}
           pageFootnotesOf={pageFootnotesOf}
           footnotesBeneathText={doc.parsed.footnoteProps?.pos === 'beneathText'}

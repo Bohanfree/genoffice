@@ -72,6 +72,8 @@ export const th = {
   appStyleUpdated:
     'อัปเดตสไตล์ "{name}" ด้วยรูปแบบของส่วนที่เลือกแล้ว จะเขียนลงในเอกสารเมื่อบันทึก',
   appStyleCreated: 'สร้างสไตล์ "{name}" และนำไปใช้กับส่วนที่เลือกแล้ว',
+  appStyleInstancesSelected: 'เลือก “{name}” แล้ว {count} รายการ',
+  appStyleNoInstances: 'ไม่มีข้อความที่ใช้ “{name}”',
   appPgNumFormatSet: 'ตั้งค่ารูปแบบหมายเลขหน้าแล้ว',
   appPageNumFormatTitle: 'รูปแบบหมายเลขหน้า',
   appNumberFormat: 'รูปแบบตัวเลข',
@@ -135,6 +137,7 @@ export const th = {
   appCommentsTitle: 'ข้อคิดเห็น ({n})',
   appCommentPlaceholder: 'พิมพ์ข้อคิดเห็น…',
   appCommentBtn: 'ข้อคิดเห็น',
+  appAttachImage: 'แนบรูปภาพ',
   appUnknownAuthor: '(ไม่ทราบผู้เขียน)',
   appResolved: 'แก้ไขแล้ว',
   appResolvedComments: 'ข้อคิดเห็นที่แก้ไขแล้ว ({n})',

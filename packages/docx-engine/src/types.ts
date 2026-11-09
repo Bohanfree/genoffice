@@ -284,6 +284,9 @@ export interface Run {
     rotDeg?: number
     flipH?: boolean
     flipV?: boolean
+    /** pictures of a picture-only wpg group stacked bottom first, each placed in
+     *  fractions of the image box; dataUrl is the first of them (display-only) */
+    layers?: { dataUrl: string; x: number; y: number; w: number; h: number }[]
     /** VML horizontal rule (v:rect o:hr), alone or sharing the paragraph with text:
      *  drawn as a rule on a line of its own like Word (dataUrl is empty). The line is
      *  as tall as the rule run's own font (sizeHalfPoints = the run's w:sz), not the
@@ -300,6 +303,16 @@ export interface Run {
 }
 
 /** One comment from word/comments.xml (read-only display model). */
+/** a picture inside a comment: shown under the comment's text and saved back into it (genoffice#2040) */
+export interface CommentImage {
+  mime: NewImage['mime']
+  /** the picture bytes, base64 */
+  base64: string
+  /** the display size, px (the drawing's extent) */
+  widthPx: number
+  heightPx: number
+}
+
 export interface CommentInfo {
   id: string
   author: string
@@ -308,6 +321,8 @@ export interface CommentInfo {
   date?: string
   /** plain text, paragraphs joined with \n */
   text: string
+  /** the picture the comment carries; absent for a text-only comment */
+  image?: CommentImage
   /** Reply: the parent comment's w:id (resolved via the paraId relation in commentsExtended) */
   parentId?: string
   /** Resolved (w15:done) */
@@ -359,6 +374,44 @@ export interface SdtShell {
    * sdt; only the first carries openXml and only the last carries closeXml.
    */
   group?: number
+  /**
+   * 0-based nesting depth of this wrapper inside the block's control chain
+   * (0 = outermost). Only set on Block.sdtShells entries: sdtShell keeps just
+   * the outermost wrapper for compatibility.
+   */
+  level?: number
+  /**
+   * docxIndex of the block whose original xml physically owns this level's
+   * opening bytes. A control split into several blocks keeps its open bytes on
+   * the first block and its close bytes on the last, so a level can be
+   * unwrapped without guessing which identical </w:sdtContent></w:sdt> slice
+   * belongs to it.
+   */
+  openBlock?: number
+  /** byte offset of openXml inside that block's original xml */
+  openOffset?: number
+  /** docxIndex of the block owning this level's closing bytes */
+  closeBlock?: number
+  /** byte offset of closeXml inside that block's original xml */
+  closeOffset?: number
+}
+
+/**
+ * A run-level (inline) content control inside a paragraph, read-only: its
+ * bytes stay in the paragraph's original xml, so reading never changes the
+ * run text or the model of the paragraph.
+ */
+export interface InlineContentControl {
+  /** programmatic tag (w:sdtPr/w:tag), may be empty */
+  tag: string
+  /** human-visible title (w:sdtPr/w:alias), may be empty */
+  title: string
+  /** lock state (w:sdtPr/w:lock), empty when the control carries none */
+  lock: string
+  /** control id (w:sdtPr/w:id), empty when the control carries none */
+  id: string
+  /** the plain text that sits inside the control */
+  text: string
 }
 
 /** One custom tab stop from w:tabs/w:tab. Positions are in twips. */
@@ -691,6 +744,10 @@ export interface SectionSettings {
           color?: string
           /** w:val names one of Word's bitmap art borders (gems, zigZagStitch, …) */
           art?: true
+          /** w:shadow="1": Word's Shadow setting (drop shadow at the bottom-right) */
+          shadow?: true
+          /** w:frame="1": Word's 3-D setting */
+          frame?: true
         }
       >
     >
@@ -892,6 +949,11 @@ export interface HfTableCell {
   /** cell margins (twips): w:tcMar over w:tblCellMar; absent sides use Word's
    *  defaults (0 top/bottom, 108 left/right) */
   marTwips?: CellMargins
+  /** w:vMerge restart: number of rows the cell spans (its content sizes none
+   *  of them; Word lays it over the merged rows) */
+  vSpan?: number
+  /** w:vMerge continuation: an empty placeholder under the spanning cell */
+  vMergeContinue?: true
   /** paras were flattened out of a nested table: display-only, not editable */
   locked?: true
   /** editor-side: the cell's paragraphs changed; saving regenerates them from
@@ -978,6 +1040,10 @@ export interface HeaderFooter {
   /** editor-side: bytes of pictures inserted into the part, keyed by the
    *  placeholder token their drawing XML carries (see SaveOptions.newPictures) */
   newPictures?: Record<string, { base64: string; mime: NewImage['mime'] }>
+  /** floating pictures moved or resized in the strip, keyed by HfImage.drawing */
+  pictureEdits?: Record<number, HfPictureEdit>
+  /** only pictureEdits changed: the part's text paragraphs keep their bytes */
+  pictureOnly?: boolean
   /** tracked changes the editor accepted / rejected in the part: replayed on the
    *  original bytes before the paragraphs regenerate */
   revisionsResolved?: RevisionResolution[]
@@ -986,10 +1052,22 @@ export interface HeaderFooter {
   keepContent?: true
 }
 
+/** a floating header/footer picture's new box: its top-left corner page-relative
+ *  px on each axis it moved along; an axis left out keeps its own base and
+ *  offset (a resize from the far edge) */
+export interface HfPictureEdit {
+  posXPx?: number
+  posYPx?: number
+  widthPx: number
+  heightPx: number
+}
+
 /** Placeholder for NUMPAGES (total pages) fields in headers/footers; the renderer substitutes the total page count and saving writes the field back (PAGE uses PAGE_MARK the same way) */
 export const TOTAL_PAGES_MARK = '\uE000'
 /** Placeholder for PAGE fields in headers/footers; a private-use character so literal '#' text in the part can never be mistaken for the field position */
 export const PAGE_MARK = '\uE001'
+/** Placeholder for SECTIONPAGES fields in headers/footers: the renderer substitutes the page count of the page's section, saving writes the field back */
+export const SECTION_PAGES_MARK = '\uE002'
 
 /** display-only image in a header/footer part (logos etc.; saving preserves the part's bytes) */
 export interface HfImage {
@@ -1039,11 +1117,16 @@ export interface HfImage {
   anchorPara?: number
   /** source crop (a:srcRect) as fractions of the source picture (display-only) */
   crop?: { l: number; t: number; r: number; b: number }
+  /** ordinal of its <w:drawing> in the part XML: set on single-picture anchors,
+   *  the ones the strip can move and resize (HeaderFooter.pictureEdits keys) */
+  drawing?: number
+  /** wp:anchor distL/distR/distT/distB (px): text clearance of a wrapped drawing */
+  wrapDistPx?: { l: number; r: number; t: number; b: number }
 }
 
 /** Parsed content of one header/footer part (any w:type variant). */
 export interface HfPartInfo {
-  /** plain text, PAGE fields shown as PAGE_MARK, NUMPAGES as TOTAL_PAGES_MARK */
+  /** plain text, PAGE fields shown as PAGE_MARK, NUMPAGES as TOTAL_PAGES_MARK, SECTIONPAGES as SECTION_PAGES_MARK */
   text: string
   hasPageNumber: boolean
   paras: HfParagraph[]
@@ -1149,8 +1232,16 @@ export interface FieldDisplay {
   bold?: boolean
   /** character style (w:rStyle) of the tocLine's leading result run */
   runStyleId?: string
+  /** tocLine with num: width (twips) of the number cell, from the first line's start to the
+   *  left tab stop the title jumps to; absent = a fixed gap after the number */
+  numTabTwips?: number
+  /** tocLine: effective first-line indent (twips, negative = hanging); the wrapper drops the
+   *  paragraph's own indents, so the entry body applies it */
+  hangTwips?: number
   /** leader of the tocLine's right tab stop (direct pPr, else the style); undefined = unknown, drawn as dots */
   leader?: TabStop['leader']
+  /** position (twips, from the column edge) of that right tab stop; absent = the column edge */
+  rightTabTwips?: number
   /** formatted result runs of a text field (italic journal names, a manual
    *  drop-cap letter next to body text); their joined text equals `left` */
   runs?: FieldRun[]
@@ -1662,6 +1753,17 @@ export interface StrayIndent {
   firstLineTwips?: number
 }
 
+/** one anchored rule over a text paragraph; px from the column left / paragraph top (space-before included) */
+export interface RuleOverlay {
+  xPx: number
+  yPx: number
+  widthPx: number
+  /** effective w:spacing before (px): the paragraph box starts below it */
+  spaceBeforePx: number
+  thicknessPx?: number
+  colorHex?: string
+}
+
 export interface Block {
   /** stable id for editor bookkeeping */
   id: string
@@ -1751,6 +1853,9 @@ export interface Block {
    *  paragraph mark): side-wrapped anchored pictures, invisible VML picts.
    *  clear = a w:br w:clear in that paragraph: the line resumes below the floats on that side */
   anchorLine?: { styleId?: string; format?: ParaFormat; clear?: 'all' | 'left' | 'right' }
+  /** anchored thin-line shapes (fill-in blanks, underline rules) a text paragraph
+   *  carries: drawn over the paragraph at their column/paragraph offsets, display only */
+  ruleOverlays?: RuleOverlay[]
   /** paragraph alignment of the image (w:jc) */
   imageAlign?: 'left' | 'center' | 'right'
   /** the drawing paragraph's own w:ind left (twips): an inline text box
@@ -1851,8 +1956,22 @@ export interface Block {
    * original sdtPr + shell bytes are stored here for save-time re-wrapping.
    * The block's runs/format are from sdtContent and are fully editable;
    * saving patches only those runs while keeping the sdt shell verbatim.
+   * Holds only the outermost wrapper; read sdtShells for the whole chain.
    */
   sdtShell?: SdtShell
+  /**
+   * Every block-level control wrapping this block, outermost first (nested
+   * controls are captured level by level; sdtShell keeps the outermost for
+   * compatibility). Each entry carries its own metadata and open/close bytes,
+   * plus the block that owns those bytes, so a specific level can be unwrapped.
+   */
+  sdtShells?: SdtShell[]
+  /**
+   * Run-level (inline) content controls inside a paragraph, read-only: they
+   * are reported with their tag/title/lock/id and inner text, while their
+   * bytes stay untouched in the paragraph's original xml.
+   */
+  inlineContentControls?: InlineContentControl[]
   /**
    * Move revision: 'from' = content was moved away (shown with strikethrough + red bg),
    * 'to' = content was moved here (shown with green bg). Accept/reject via del/ins marks.
@@ -1986,9 +2105,9 @@ export interface TextboxDisplay {
    */
   txbxIndex?: number
   /**
-   * wps:cNvPr id of the owning DrawingML shape. A box with no txbxIndex has
-   * no w:txbxContent yet: its first text commit injects a fresh wps:txbx into
-   * the shape addressed by this id.
+   * wps:cNvPr id of the owning DrawingML shape (pic:cNvPr for a photo box).
+   * A box with no txbxIndex has no w:txbxContent yet: its first text commit
+   * injects a fresh wps:txbx into the shape addressed by this id.
    */
   shapeId?: string
   /**
@@ -1998,6 +2117,8 @@ export interface TextboxDisplay {
    * commit would corrupt the table (sidebars).
    */
   readOnly?: boolean
+  /** a pic:pic sharing its paragraph with other drawings, rendered as a filled box: it is a picture, not a shape */
+  picture?: boolean
   paras: TextboxParaDisplay[]
   /** this box's own wp:anchor offset (EMU); with `floating`, the box positions
    *  absolutely at the offset from the paragraph's flow origin */
@@ -2268,6 +2389,9 @@ export interface TableStyleDisplay {
   band1Fill?: string
   /** even-band row shading (band2Horz) */
   band2Fill?: string
+  /** banded-row cell borders / margins (band1Horz / band2Horz tcPr); fills stay in band*Fill */
+  band1Horz?: TableCondFormat
+  band2Horz?: TableCondFormat
   /** rows per horizontal band (style-level w:tblStyleRowBandSize) */
   rowBandSize?: number
   /** style-level table borders (w:tblPr w:tblBorders); fallback when the document level has none */
