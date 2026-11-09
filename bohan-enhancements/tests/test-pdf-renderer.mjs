@@ -71,11 +71,14 @@ console.log(
 
 // Execute the shipped component's real hook sequence with a restored OCR page.
 // In 446 the upstream eager bake memo referenced pageGeomRef before initialization.
-if (process.env.BOHAN_ADAPTER_VERSION === '0.12.446') {
+if (['0.12.446', '0.12.852'].includes(process.env.BOHAN_ADAPTER_VERSION)) {
   const start = source.indexOf('  const [ocrPages, setOcrPages] =');
   const refEnd = source.indexOf('  pageGeomRef.current = pageGeom;', start) + '  pageGeomRef.current = pageGeom;'.length;
   const memoStart = source.indexOf('  const ocrBakeInserts =', start);
-  const memoEnd = source.indexOf('  }, [ocrPages, pageGeom]);', memoStart) + '  }, [ocrPages, pageGeom]);'.length;
+  const memoClose = process.env.BOHAN_ADAPTER_VERSION === '0.12.852'
+    ? '  }, [ocrPages]);'
+    : '  }, [ocrPages, pageGeom]);';
+  const memoEnd = source.indexOf(memoClose, memoStart) + memoClose.length;
   const fragment = source.slice(start, Math.max(refEnd, memoEnd));
   let firstState = true;
   const renderContext = vm.createContext({

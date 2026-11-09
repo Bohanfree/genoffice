@@ -29,6 +29,21 @@ EXPECTED_RENDERERS = {
 
 # Each adapter is pinned to the exact clean macOS vendor build.
 VERSIONS = {
+    '0.12.852': {
+        'names': {'docs': 'index-DMyQV0sR.js', 'sheets': 'index-CS27lpgu.js', 'pdf': 'index-B8Me_X6W.js'},
+        'baselines': {
+            'docs': '49d9cb06f64cebd46fbd56c3fe27930ba664aaabe9dd8f590f4dd00525ad2150',
+            'sheets': 'f26df5b4ce00fa0f609ddeb8c93a5cc183d8b8c7b0364c78e6ebf565f64e1cdc',
+            'pdf': '9ad13036f87730d5c7bb62d9c7b1eec5c2f06113aab21efbf6beea2e16f1c101',
+        },
+        'expected': {
+            'docs': 'ae0c3c49cddc2e97b7238663ecb78ea84c0fbf5db01a1ada9a8343488d5a671e',
+            'sheets': '47e87a98d3826fe162cc19a2c46ced7310f914e868ece35cc27edcf03dd009d7',
+            'pdf': '9600079d11aa4a3b2941c3dea31393c53ca9d7ee2bacda8ef50778282137b449',
+        },
+        'release': 'bohan-v0.12.852-macos.1', 'platform': 'darwin-arm64',
+        'sourceBaseline': 'v0.12.852',
+    },
     '0.12.446': {
         'names': {'docs': 'index-hHkjX_DW.js', 'sheets': 'index-ayY7qpCu.js', 'pdf': 'index-H9Qe9zLW.js'},
         'baselines': {
@@ -88,8 +103,11 @@ def stage(resources, output, version=None, platform=None):
     if selected is None:
         raise ValueError('unsupported or already modified renderer; supply a clean supported desktop app.')
     config = dict(VERSIONS[selected])
-    platform = platform or ('darwin-arm64' if sys.platform == 'darwin' and selected == '0.12.446' else config.get('platform', 'darwin'))
+    platform = platform or ('darwin-arm64' if sys.platform == 'darwin' and selected in ('0.12.446', '0.12.852') else config.get('platform', 'darwin'))
     mac446 = selected == '0.12.446' and platform == 'darwin-arm64'
+    mac852 = selected == '0.12.852' and platform == 'darwin-arm64'
+    if selected == '0.12.852' and not mac852:
+        raise ValueError('The 0.12.852 adapter supports only macOS ARM64.')
     if mac446:
         config.update(platform=platform, release='bohan-v0.12.446.7-macos.1')
     sources = {m: p.read_text(encoding='utf-8') for m, p in paths.items()}
@@ -103,14 +121,19 @@ def stage(resources, output, version=None, platform=None):
         stage_main = importlib.util.module_from_spec(spec_main)
         spec_main.loader.exec_module(stage_main)
         main_archive = stage_main.patch_asar((resources / 'app.asar').read_bytes())
-    if selected == '0.12.446':
+    if selected in ('0.12.446', '0.12.852'):
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
-        import stage_webdav
-        if mac446:
+        if mac852:
+            import stage_webdav_852 as stage_webdav
+            import stage_macos_852 as stage_macos
+            main_archive = stage_macos.patch_asar((resources / 'app.asar').read_bytes())
+        elif mac446:
+            import stage_webdav
             import stage_macos
             main_archive = stage_macos.patch_asar((resources / 'app.asar').read_bytes())
         else:
+            import stage_webdav
             main_archive = stage_webdav.patch_asar((resources / 'app.asar').read_bytes())
     rendered = {
         'docs': patches.patch_word(patches.patch_official(sources['docs'])),
@@ -138,15 +161,15 @@ def stage(resources, output, version=None, platform=None):
             shutil.copyfile(ROOT / 'tables' / name, docs / name)
         for name in ('wps-table-beautify-core.mjs', 'wps-table-beautify-ui.mjs', 'wps-presets.json'):
             shutil.copyfile(ROOT / 'tables' / name, sheets / name)
-        if selected == '0.12.446':
+        if selected in ('0.12.446', '0.12.852'):
             for module in ('docs', 'pdf'):
                 relative = Path('modules') / module / 'preload/index.js'
                 target = dest / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(stage_webdav.preload_bytes(module, (resources / relative).read_bytes()))
-            extra = ('Configure-WebDAV.ps1', 'credentials.ps1') if mac446 else ('*darwin*',)
+            extra = ('Configure-WebDAV.ps1', 'credentials.ps1') if mac446 or mac852 else ('*darwin*',)
             shutil.copytree(ROOT / 'webdav', dest / 'bohan-webdav', ignore=shutil.ignore_patterns('__pycache__', *extra))
-            if mac446:
+            if mac446 or mac852:
                 (dest / 'bohan-webdav/bootstrap.cjs').write_bytes(stage_macos.bootstrap_bytes())
         files = {p.relative_to(dest).as_posix(): digest(p.read_bytes()) for p in sorted(dest.rglob('*')) if p.is_file()}
         (dest / 'bohan-overlay.json').write_text(json.dumps({

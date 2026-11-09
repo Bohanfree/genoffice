@@ -74,7 +74,7 @@ class StageTests(unittest.TestCase):
             config = module.VERSIONS[version]
             mac446 = manifest['platform'] == 'darwin-arm64'
             self.assertEqual(len(files), 25 if mac446 else 13 if version == '0.12.117' else 23 if version == '0.12.446' else 12)
-            self.assertEqual(manifest['release'], f'bohan-v{version}.7-macos.1' if mac446 else f'bohan-v{version}.7' if version == '0.12.446' else f'bohan-v{version}.1')
+            self.assertEqual(manifest['release'], config['release'] if version == '0.12.852' else f'bohan-v{version}.7-macos.1' if mac446 else f'bohan-v{version}.7' if version == '0.12.446' else f'bohan-v{version}.1')
             self.assertEqual(manifest['sourceBaseline'], config.get('sourceBaseline', 'v0.12.115' if version == '0.12.117' else 'v0.12.29'))
             self.assertEqual(set(files), set(manifest['files']))
             for app, expected in config['expected'].items():
@@ -82,6 +82,10 @@ class StageTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), expected)
             for name, expected in files.items():
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), expected)
+            if version == '0.12.852':
+                bootstrap = (output / 'bohan-webdav/bootstrap.cjs').read_text()
+                self.assertIn('增强版 0.12.852-macos.1', bootstrap)
+                self.assertNotIn('增强版 0.12.446.7', bootstrap)
             self.assertEqual(fingerprint(inputs), before)
 
             # Installing the overlay and attempting to patch it again must fail
@@ -93,7 +97,7 @@ class StageTests(unittest.TestCase):
             self.assertFalse(repeated.exists())
             self.assertEqual(fingerprint([output / name for name in files]), output_before)
 
-            if version in ('0.12.117', '0.12.446'):
+            if version in ('0.12.117', '0.12.446', '0.12.852'):
                 # A clean renderer set alone is insufficient: independently
                 # modified host bytes must stop staging before any writes.
                 mixed = base / 'mixed-resources'

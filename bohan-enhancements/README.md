@@ -1,6 +1,20 @@
 # Bohan Office enhancements
 
-Versioned enhancements for **Windows x64 and macOS ARM64 GenOffice 0.12.446**, plus historical **macOS 0.12.29 and 0.12.117** adapters. Maintained in the `bohan` branch of [Bohanfree/genoffice](https://github.com/Bohanfree/genoffice). The independent public-document skill stays at [genoffice-official-typeset-skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
+Versioned enhancements for **macOS ARM64 GenOffice 0.12.852** and **Windows x64 and macOS ARM64 GenOffice 0.12.446**, plus historical **macOS 0.12.29 and 0.12.117** adapters. Maintained in the `bohan` branch of [Bohanfree/genoffice](https://github.com/Bohanfree/genoffice). The independent public-document skill stays at [genoffice-official-typeset-skill](https://github.com/Bohanfree/genoffice-official-typeset-skill).
+
+### macOS ARM64 0.12.852 update
+
+The 852 adapter retains official-document layout, Word/Excel table beautification, manual PDF OCR with local cache, WebDAV cloud folders and history, and the macOS SMB save fallback. Generate its 25-file overlay from the clean upstream `GenOffice-0.12.852-arm64.dmg` (SHA-256 `7724ead484688d4bc061dbdfdf1326340b7fb8101c796d2760b2baf63721f52b`):
+
+```sh
+python3 bohan-enhancements/stage.py --version 0.12.852 --platform darwin-arm64 \
+  --resources /path/to/clean/GenOffice.app/Contents/Resources \
+  --output /path/to/new/bohan-overlay
+```
+
+The generated manifest pins the clean host, preloads and renderers, and the output hashes. This adapter targets macOS ARM64 only. Applying resources changes the vendor's signed bundle; a locally runnable build needs an appropriate local code signature, including its nested framework libraries. Changing the signing identity may require macOS Keychain authorization to reuse existing `safeStorage` credentials. Keep a complete closed-app and user-data backup before installing.
+
+Local acceptance covered a clean staging run and rejection of modified inputs, portable and shipped-renderer tests, local DOCX/XLSX formatting and saving, PDF manual OCR, and the home cloud-folder entry. Refer to [RELEASE-0.12.852.md](RELEASE-0.12.852.md) for the tested scope.
 
 ### macOS ARM64 0.12.446 update
 
@@ -17,6 +31,8 @@ The official DMG is obtained separately from the upstream `v0.12.446` release: `
 | `v0.12.29` | Official macOS 0.12.29 | GitHub `v0.12.29` | 12 renderer/helper files |
 | `v0.12.117` | Official macOS 0.12.117 from the vendor's company CDN update feed | GitHub `v0.12.115` | 12 renderer/helper files + `app.asar` |
 | `v0.12.446` | Official Windows x64 0.12.446 | GitHub `v0.12.446` | 23 files: formatting/OCR renderers, pinned shell host/preload/renderer, 2 module preloads and 8 WebDAV helpers |
+| `v0.12.446` | Official macOS ARM64 0.12.446 | GitHub `v0.12.446` | 25 files: formatting/OCR renderers, host, preloads and macOS WebDAV helpers |
+| `v0.12.852` | Official macOS ARM64 0.12.852 | GitHub `v0.12.852` | 25 files: formatting/OCR renderers, host, preloads and macOS WebDAV helpers |
 
 ### Windows 0.12.446 update
 
@@ -71,14 +87,15 @@ Use Python 3.10+, a **clean original supported macOS app**, and a fresh output d
 python3 bohan-enhancements/stage.py \
   --resources /path/to/clean/GenOffice.app/Contents/Resources \
   --output /path/to/new/bohan-overlay \
-  --version 0.12.117
+  --version 0.12.852 \
+  --platform darwin-arm64
 ```
 
 Unknown, mixed or already patched inputs are rejected before output creation. For 117, the generator also verifies the complete clean `app.asar`, changes only `out/main/index.js`, recalculates archive integrity records, verifies every other member is byte-for-byte unchanged, and checks the expected final archive hash. The resulting `bohan-overlay.json` records desktop-package version, public source baseline and each generated file's SHA-256.
 
 The Windows 446 recipe independently pins its clean host archive and both affected preloads. It changes only the main ASAR member to install the backup service and observe successful native workbook operations. Docs/PDF preloads add an acknowledgement of a successfully parsed native open. Failed, cancelled and password-pending opens do not create snapshots. All other ASAR members are verified unchanged; the official executable stays intact.
 
-Before installing, save open work and back up the entire current app plus the GenOffice user-data folder. Keep a clean copy of the new official app for generating a fresh overlay and a copy of the previous customized app for rollback. On macOS, first install and launch the clean official new version once, then quit it before applying the overlay. This establishes the official first-launch state before package resources are changed. Use Finder to copy **all files listed in the overlay manifest** to their matching paths under the new app's `Contents/Resources`, preserving filenames. The 117 list includes `app.asar` as well as renderer files. Do not copy the overlay manifest over an application resource. On macOS use Finder if package writes are protected; preserve the official executable, `Info.plist` and system security settings.
+Before installing, save open work and back up the entire current app plus the GenOffice user-data folder. Keep a clean copy of the new official app for generating a fresh overlay and a copy of the previous customized app for rollback. Launch the clean version using a separate test profile and quit it before preparing the enhanced application. Copy **all files listed in the overlay manifest** to their matching paths under a separate copy of the new app's `Contents/Resources`, preserving filenames. Do not copy the overlay manifest over an application resource. On macOS, replacing signed resources invalidates the upstream signature; validate the resulting local signature and startup before replacing the installed application.
 
 Verify the installed files against the manifest and restart GenOffice. Use fictional local documents to check public-document layout/apply/restore, Word and Excel beautification/undo/save/reopen, and PDF manual OCR/cache reuse. Use a newly created test workbook on the actual SMB share to verify repeated save/reopen and visible output. Restore the backed-up app to roll back. Official application updates replace package resources, so generate and test a matching adapter before switching to another version.
 
