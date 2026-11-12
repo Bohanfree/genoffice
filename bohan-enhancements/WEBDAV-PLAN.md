@@ -29,4 +29,6 @@
 
 公文排版、Word/Excel 表格美化、PDF 手动识别、本地原文、恢复缓存及 OCR 缓存全部保留。OCR 缓存和未保存编辑不上传。旧 backups-v1 原样保留，不批量回填最近文件。暂停和文件夹排除继续生效。默认每文件 512 MiB、待传快照总量 2 GiB，远端历史容量由 WebDAV 空间决定。
 
+2026-11-12 起，停用旧版 macOS `GenOfficeRoaming` 组件向固定本地文件夹自动复制文档的功能，日常备份使用 WebDAV 自动上传和云端历史。该组件独立于当前 fork overlay；后续升级须保留其 `config.disabled.json`，不重建 `config.json` 或恢复启动补丁。原有文件夹中的副本继续保留，清理另行处理。WebDAV 待传快照、未保存编辑恢复、Docs 内部原件归档和 OCR 缓存沿用现有逻辑。操作说明见 [README](README.md#local-roaming-copies-retired-2026-11-12)。
+
 包含 23 个经过 SHA-256 验证的 overlay 文件，从干净的官方 Windows 0.12.446 生成。先发布 fork，再下载 fork 的 recipe 更新本机。

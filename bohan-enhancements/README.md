@@ -16,6 +16,14 @@ The generated manifest pins the clean host, preloads and renderers, and the outp
 
 Local acceptance covered a clean staging run and rejection of modified inputs, portable and shipped-renderer tests, local DOCX/XLSX formatting and saving, PDF manual OCR, and the home cloud-folder entry. Refer to [RELEASE-0.12.852.md](RELEASE-0.12.852.md) for the tested scope.
 
+### Local roaming copies retired (2026-11-12)
+
+The earlier standalone macOS `GenOfficeRoaming` component copied opened documents into a fixed local folder and refreshed those copies after saves. This feature is retired in favor of WebDAV automatic upload and cloud history. Current fork overlays do not install or launch that component.
+
+For an existing standalone installation, disable it by renaming `~/Library/Application Support/GenOfficeRoaming/config.json` to `config.disabled.json` while its cache service is stopped. Preserve the configuration contents and all existing document copies. The legacy startup hook requires `config.json` and skips the component when it is absent. If both configuration filenames already exist, preserve both and resolve them before renaming.
+
+Future upgrades must preserve this disabled state: do not recreate the legacy configuration, reinstall its startup hook, or restart its cache service. WebDAV synchronization, pending-upload snapshots, unsaved-edit recovery, the Docs internal original archive and PDF OCR caches retain their existing behavior. Existing files in the former copy folder are kept until separately reviewed for cleanup. Local paths, document inventories and credentials are not included in this repository.
+
 ### macOS ARM64 0.12.446 update
 
 The Mac ARM64 official package shares the exact pinned JavaScript host, renderers and preloads with Windows 446. `stage.py --version 0.12.446 --platform darwin-arm64` generates a 25-file overlay (`bohan-v0.12.446.7-macos.1`). It reuses the formatting, font alias, table, manual OCR, cloud folder, two-way sync and version history logic, and additionally carries the validated macOS SMB error-45 fallback and EAGAIN handling from 117. The existing Windows output remains unchanged; its PowerShell helpers are excluded from the Mac overlay.
