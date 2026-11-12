@@ -27,7 +27,7 @@ class CloudService {
     this.viewed.add(value);
     const parts=parseVirtual(value), rows=await this.client.list(parts);
     return {dir:value,folders:rows.filter(r=>r.directory).map(r=>({path:virtual(r.parts),name:r.name,mtimeMs:r.mtimeMs,hasSubfolders:true})),
-      files:rows.filter(r=>!r.directory).map(r=>({path:virtual(r.parts),name:r.name,ext:path.extname(r.name).slice(1).toLowerCase(),
+      files:rows.filter(r=>!r.directory).sort((a,b)=>(Number(b.mtimeMs)||0)-(Number(a.mtimeMs)||0)).map(r=>({path:virtual(r.parts),name:r.name,ext:path.extname(r.name).slice(1).toLowerCase(),
         mtimeMs:r.mtimeMs,sizeBytes:r.sizeBytes,starred:false}))};
   }
   find(parts) {

@@ -64,6 +64,14 @@ test('cloud folder lists UTF-8, nested same names and hides system storage',asyn
     const p1=await a.cloud.open(root.files[0].path),p2=await a.cloud.open(nested.files[0].path);assert.notEqual(p1,p2);assert.equal(fs.readFileSync(p2,'utf8'),'nested');
   }finally{await f.close();}
 });
+test('cloud files are listed newest first regardless of server order',async()=>{
+  const f=await fixture();try{const a=f.device();
+    f.put(['old.docx'],'old');f.put(['new.docx'],'new');f.put(['middle.docx'],'middle');
+    const root=await a.cloud.list(ROOT);
+    assert.deepEqual(root.files.map(r=>r.name),['middle.docx','new.docx','old.docx']);
+    assert.deepEqual([...root.files].reverse().map(r=>r.name),['old.docx','new.docx','middle.docx']);
+  }finally{await f.close();}
+});
 test('two devices exchange edits and restore durable cloud versions',async()=>{
   const f=await fixture();try{const a=f.device(),b=f.device();f.put(['sample.docx'],'A');
     const pa=await a.cloud.open(virtual(['sample.docx'])),pb=await b.cloud.open(virtual(['sample.docx']));
