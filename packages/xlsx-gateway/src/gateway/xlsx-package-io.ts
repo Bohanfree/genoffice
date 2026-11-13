@@ -26,6 +26,7 @@ import type {
   SheetProtectionState,
   SheetTabColorState,
   SheetPivotAddition,
+  SheetSlicerState,
   SheetSparklineAddition,
   SheetStructuralOps,
   SheetTableAddition,
@@ -33,6 +34,7 @@ import type {
   SheetVisualAddition,
   SheetFormulaValues,
   SheetCellImageAddition,
+  ExternalLinkOps,
 } from './xlsx-gateway'
 import { planCellEditsToXlsx, syncFileBestEffort } from './xlsx-gateway'
 import { normalizeOoxmlPartPrefix } from './xlsx-namespace'
@@ -108,8 +110,13 @@ export interface StreamingSaveRequest {
   readonly pivotRefreshUpdates?: readonly PivotRefreshUpdate[] | undefined
   readonly visualEdits?: readonly WorkbookVisualEdit[] | undefined
   readonly sparklineAdditions?: readonly SheetSparklineAddition[] | undefined
+  /// Session slicer/timeline panels written as x14/x15 slicer parts; null =
+  /// no slicer changes ride this save.
+  readonly slicerState?: SheetSlicerState | null | undefined
   /// Recalculated formula-cell values written into <v>
   readonly formulaValues?: readonly SheetFormulaValues[] | undefined
+  /// External-link breaks and source retargets, resolved on the final contents
+  readonly externalLinkOps?: ExternalLinkOps | null | undefined
   readonly themeState?: WorkbookThemeState | null | undefined
   readonly workbookProtectionState?: { readonly lockStructure: boolean } | null | undefined
   readonly protectedRangeStates?: readonly SheetProtectedRangesState[] | undefined
@@ -177,7 +184,6 @@ export async function saveWorkbookViaSidecar(
   request: StreamingSaveRequest,
 ): Promise<StreamingSaveResult> {
   const workDir = await mkdtemp(join(tmpdir(), 'ai-excel-save-'))
-  // SMB servers can retain a dot-file's hidden flag when it replaces the target.
   const temporaryTarget = join(
     dirname(request.targetPath),
     `${basename(request.targetPath)}.${randomUUID()}.tmp`,
@@ -216,7 +222,9 @@ export async function saveWorkbookViaSidecar(
       request.tabColorStates ?? [],
       request.tableEdits ?? [],
       request.cellImageAdditions ?? [],
+      request.externalLinkOps ?? null,
       request.redactionStates ?? null,
+      request.slicerState ?? null,
     )
 
     const replacements = await writePlanContents(workDir, 'replace', plan.replaced)
@@ -224,40 +232,15 @@ export async function saveWorkbookViaSidecar(
       ...(await writePlanContents(workDir, 'add', plan.added)),
       ...(await writePlanContents(workDir, 'add-bin', plan.addedBinary)),
     ]
-    const archiveRequest = {
-      sourcePath: request.sourcePath,
-      targetPath: temporaryTarget,
-      replacements,
-      removals: plan.removedEntries,
-      additions,
-    }
-    let archiveResult: unknown
-    try {
-      archiveResult = await request.client.saveArchive(archiveRequest)
-    } catch (error: unknown) {
-      // Rust sync_all requests F_FULLFSYNC on macOS; some SMB servers reject
-      // it with ENOTSUP. Rebuild locally, then copy and verify the sibling
-      // temporary archive before using the normal validated promotion path.
-      if (
-        process.platform !== 'darwin' ||
-        !/\(os error 45\)/.test(error instanceof Error ? error.message : String(error))
-      )
-        throw error
-      const localTarget = join(workDir, 'smb-save-fallback.xlsx')
-      archiveResult = await request.client.saveArchive({
-        ...archiveRequest,
-        targetPath: localTarget,
-      })
-      const localResult = saveArchiveResultSchema.parse(archiveResult)
-      await copyFile(localTarget, temporaryTarget)
-      const copiedManifest = manifestResultSchema.parse(
-        await request.client.archiveManifest(temporaryTarget),
-      ).entries
-      if (!manifestsEqual(localResult.afterEntries, copiedManifest)) {
-        throw new Error('The workbook copy failed validation while saving — aborted.')
-      }
-    }
-    const result = saveArchiveResultSchema.parse(archiveResult)
+    const result = saveArchiveResultSchema.parse(
+      await request.client.saveArchive({
+        sourcePath: request.sourcePath,
+        targetPath: temporaryTarget,
+        replacements,
+        removals: plan.removedEntries,
+        additions,
+      }),
+    )
 
     // The source manifest was read before planning; if the file changed on
     // disk in between, the save's own before-manifest exposes the drift.
@@ -430,8 +413,8 @@ export function assertManifestPreserved(
   }
 }
 
-/** Transient Windows/SMB codes: another process briefly locks a path. */
-const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'EAGAIN'])
+/** Transient Windows codes: antivirus/indexer/cloud sync briefly locks a path. */
+const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
 const RENAME_RETRIES = 4
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
