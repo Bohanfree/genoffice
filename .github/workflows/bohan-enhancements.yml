@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        adapter: ["0.12.29", "0.12.117", "0.12.446", "0.12.852"]
+        adapter: ["0.12.29", "0.12.117", "0.12.446", "0.12.852", "0.13.18"]
     env:
       BOHAN_ADAPTER_VERSION: ${{ matrix.adapter }}
     steps:

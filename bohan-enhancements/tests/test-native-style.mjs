@@ -12,6 +12,7 @@ const baselines = {
   '0.12.117': 'f70f46c222f2b56c2c2d667ebfeb22f9fecf9e4becc3e12c95c1d57c7239447a',
   '0.12.446': 'd2e968d1ac0d312a5276e31f39f43988a739617cbd5828259ad9166fae159300',
   '0.12.852': 'f26df5b4ce00fa0f609ddeb8c93a5cc183d8b8c7b0364c78e6ebf565f64e1cdc',
+  '0.13.18': 'ebac45517c74dd40032e2c06b461b77682ab8a07091b8c1cc5c61126295e3f6c',
 }
 assert.ok(baselines[adapterVersion], 'Unsupported adapter version')
 const source = readFileSync(process.env.BOHAN_SHEETS_RENDERER, 'utf8')
@@ -68,7 +69,10 @@ const declarations = [
   between('function isFormulaString(value) {', 'function handleStyleToString('),
   between('function normalizeTextRuns(textRuns,', 'function insertTextRuns('),
   between('function getCellType(styles,', 'function getSheetCommandTargetWorkbook('),
-  between('function isPlainRecord$1(value) {', 'const SetRowDataMutationFactory ='),
+  between(
+    adapterVersion === '0.13.18' ? 'function isPlainRecord(value) {' : 'function isPlainRecord$1(value) {',
+    'const SetRowDataMutationFactory =',
+  ),
   between(
     'function createRangeIteratorWithSkipFilteredRows(sheet) {',
     'const ignoreRangeThemeInterceptorFilter =',
